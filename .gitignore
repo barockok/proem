@@ -1,0 +1,14 @@
+# deps
+probe/node_modules/
+probe/workspace/
+
+# Go
+bin/
+vendor/
+
+# env
+.env
+*.log
+
+# OS
+.DS_Store
