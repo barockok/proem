@@ -1,0 +1,34 @@
+# pro-ant pool example
+# Secrets via env or file; never plain token here.
+members:
+  - id: anthropic-a
+    type: anthropic_oauth
+    cred:
+      env: CLAUDE_OAT_A
+      # file: /run/secrets/oat_a
+    baseURL: https://api.anthropic.com
+    modelMap: {}
+    weight: 1
+    enabled: true
+    cooldownSec: 18000  # 5h
+
+  - id: anthropic-b
+    type: anthropic_oauth
+    cred:
+      env: CLAUDE_OAT_B
+    baseURL: https://api.anthropic.com
+    modelMap: {}
+    weight: 1
+    enabled: true
+
+  - id: openrouter-1
+    type: openrouter
+    cred:
+      env: OPENROUTER_KEY
+    baseURL: https://openrouter.ai/api/v1
+    modelMap:
+      claude-sonnet-4-20250514: anthropic/claude-sonnet-4
+      claude-haiku-4-5-20251001: anthropic/claude-haiku-4.5
+    weight: 1
+    enabled: true
+    cooldownSec: 60
