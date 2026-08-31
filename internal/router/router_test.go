@@ -88,3 +88,15 @@ func TestPickEmpty(t *testing.T) {
 	r:=New(nil)
 	if _,err:=r.Pick(context.Background(), nil, "", false); err==nil { t.Fatal()}
 }
+
+func TestPickDisabled(t *testing.T) {
+ ctx:=context.Background()
+ r:=New(nil)
+ f:=false
+ m:=[]pool.Member{{ID:"a", Type:pool.TypeGeneric, BaseURL:"https://a.com", Enabled:&f, Weight:1},{ID:"b", Type:pool.TypeGeneric, BaseURL:"https://b.com", Weight:1}}
+ got,_:=r.Pick(ctx,m,"",false)
+ if got.ID!="b" { t.Fatalf("disabled filter failed got %s", got.ID)}
+ // all disabled
+ m2:=[]pool.Member{{ID:"a", Enabled:&f},{ID:"b", Enabled:&f}}
+ if _,err:=r.Pick(ctx,m2,"",false); err==nil {t.Fatal("want err all disabled")}
+}
