@@ -9,21 +9,21 @@ var (
 	Requests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proant_requests_total",
 		Help: "Total requests by member and status",
-	}, []string{"member","code"})
+	}, []string{"member", "code"})
 
 	Failovers = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proant_failovers_total",
 		Help: "Failovers by from_member and reason",
-	}, []string{"from_member","reason"})
+	}, []string{"from_member", "reason"})
 
 	Tokens = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proant_tokens_total",
 		Help: "Tokens by member and type",
-	}, []string{"member","type"})
+	}, []string{"member", "type"})
 
 	Latency = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name: "proant_upstream_latency_seconds",
-		Help: "Upstream latency",
+		Name:    "proant_upstream_latency_seconds",
+		Help:    "Upstream latency",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"member"})
 

@@ -153,8 +153,13 @@ members:
 	}
 	defer l.Close()
 	done := make(chan struct{})
-	var reloadErrs []error
-	l.Watch(done, func(e error) { reloadErrs = append(reloadErrs, e) })
+	reloadErrs := make(chan error, 8)
+	l.Watch(done, func(e error) {
+		select {
+		case reloadErrs <- e:
+		default:
+		}
+	})
 	// trigger reload by writing valid change
 	os.WriteFile(p, []byte(`
 members:
@@ -175,7 +180,14 @@ members:
 	}
 	// write invalid yaml -> should not swap, onError called
 	os.WriteFile(p, []byte(`: bad yaml [`), 0644)
-	time.Sleep(200 * time.Millisecond)
+	select {
+	case err := <-reloadErrs:
+		if err == nil {
+			t.Fatal("expected a non-nil reload error")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("invalid reload never reported an error")
+	}
 	if l.Active().Members[0].ID != "b" {
 		t.Fatalf("invalid reload swapped pool")
 	}
@@ -187,5 +199,4 @@ members:
 	if err := empty.Close(); err != nil {
 		t.Fatalf("close empty: %v", err)
 	}
-	_ = reloadErrs
 }

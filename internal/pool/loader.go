@@ -10,8 +10,8 @@ import (
 
 // Loader watches pool.yaml and holds active pool atomically.
 type Loader struct {
-	path   string
-	pool   atomic.Pointer[Pool]
+	path    string
+	pool    atomic.Pointer[Pool]
 	watcher *fsnotify.Watcher
 }
 

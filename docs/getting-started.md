@@ -58,3 +58,7 @@ Hot reload: edit `pool.yaml` — proxy fsnotify reloads atomically, bad yaml kee
 - `redis`: `GET/SET sticky:{sid}` TTL 1h — pins session to member.
 - `none`: random weighted.
 Set via `--sticky-mode` and client header `x-claude-code-session-id` (SDK sends this).
+
+---
+
+[← Back to README](../README.md) · [Getting started](getting-started.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)

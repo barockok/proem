@@ -35,3 +35,7 @@ Scrape `:9090/metrics`. Alert on `proant_member_cooldown==1` for all members, `r
 
 - No streaming chunked passthrough yet (buffers body). For streaming, switch `forward` to `httputil.ReverseProxy` with `FlushInterval`.
 - Redis down = fail-open (all healthy), sticky miss.
+
+---
+
+[← Back to README](../README.md) · [Getting started](getting-started.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)

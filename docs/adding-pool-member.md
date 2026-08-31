@@ -71,3 +71,7 @@ Delete entry, save. No restart.
 - CooldownSec: override per member (`cooldownSec: 3600`).
 - Secrets: prefer `{file: /run/secrets/...}` with Docker/K8s secrets over env.
 - `enabled: false` to keep entry but exclude from routing (handy for rotation).
+
+---
+
+[← Back to README](../README.md) · [Getting started](getting-started.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)

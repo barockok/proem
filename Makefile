@@ -1,4 +1,4 @@
-.PHONY: build test vet cover docker lint
+.PHONY: build test vet cover cover-gate docker lint fmt
 
 build:
 	go build -o bin/pro-ant ./cmd/proxy
@@ -9,6 +9,12 @@ test:
 cover: test
 	go tool cover -html=coverage.out -o coverage.html
 	go tool cover -func=coverage.out | tail -n 20
+
+fmt:
+	gofmt -w .
+
+cover-gate:
+	./scripts/coverage.sh
 
 vet:
 	go vet ./...

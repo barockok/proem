@@ -1,14 +1,14 @@
-# deps
-probe/node_modules/
-probe/workspace/
 
 # Go
-bin/
-vendor/
-
-# env
-.env
-*.log
-
 # OS
+# deps
+# env
+*.log
 .DS_Store
+.env
+bin/
+coverage.html
+coverage.out
+probe/node_modules/
+probe/workspace/
+vendor/

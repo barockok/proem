@@ -27,3 +27,7 @@ Pods stateless, share Redis (Sentinel/Cluster) for cooldown/sticky. No DB. Binar
 ## Latency
 
 Go adds 0.2-0.5ms p50. No body parse except failover check + token extraction. Streaming proxied via body read/write (non-streaming buffering acceptable for SDK's non-stream path; streaming needs chunked forward in future).
+
+---
+
+[← Back to README](../README.md) · [Getting started](getting-started.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)
