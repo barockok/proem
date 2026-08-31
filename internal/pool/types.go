@@ -39,8 +39,16 @@ type Member struct {
 	BaseURL     string            `yaml:"baseURL" json:"baseURL"`
 	ModelMap    map[string]string `yaml:"modelMap" json:"modelMap"`
 	Weight      int               `yaml:"weight" json:"weight"`
-	Enabled     bool              `yaml:"enabled" json:"enabled"`
+	Enabled     *bool             `yaml:"enabled" json:"enabled"`
 	CooldownSec int               `yaml:"cooldownSec" json:"cooldownSec"`
+}
+
+// IsEnabled returns true if member enabled (default true when nil).
+func (m Member) IsEnabled() bool {
+	if m.Enabled == nil {
+		return true
+	}
+	return *m.Enabled
 }
 
 // Pool holds all members.

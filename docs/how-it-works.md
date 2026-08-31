@@ -1,0 +1,37 @@
+# How It Works — pro-ant
+
+## Auth variants (validated + live-captured)
+
+- `ANTHROPIC_API_KEY` -> `x-api-key`
+- `ANTHROPIC_AUTH_TOKEN` -> `Authorization: Bearer` generic
+- `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...` -> `Authorization: Bearer <oat> + anthropic-beta: oauth-2025-04-20`
+
+Precedence API wins over oauth. Captured via `@anthropic-ai/claude-agent-sdk` query() against mock server: oat sends `Authorization: Bearer sk-ant-oat01... + anthropic-beta: oauth-2025-04-20 + x-claude-code-session-id`. See `probe/capture.log`.
+
+## Request flow
+
+1. SDK sets `ANTHROPIC_BASE_URL=http://pro-ant:8080`, sends `POST /v1/messages` with `x-api-key` or `Authorization`.
+2. `handler.ServeHTTP` clones body for replay, reads pool `atomic` snapshot, extracts `x-claude-code-session-id`.
+3. Loop:
+   a. `router.Pick` filters `IsEnabled` + `FilterHealthy` (MGet cooldown:{ids}). Checks sticky if `trySticky` (first attempt, redis mode).
+   b. `forward` builds `httptarget = member.BaseURL + original path+query`, copies headers, `AuthHeaders`, `RewriteBody` modelMap, `Do`.
+   c. `ShouldFailover` checks `Retry-After` OR status+keyword. If true, `SetCooldown(member, CooldownTTL)` + `Failovers` inc, continue loop.
+   d. Success: `SetSticky(session, member)` if redis, `recordTokens` (usage.input_tokens/output_tokens), `Requests/Latency` observe, write response.
+4. Exhausted: return last status/body or 502.
+
+## Cooldown TTL
+
+`Retry-After` header value if present and numeric else `member.CooldownSec` else `18000` anthropic else `60`.
+
+## ModelMap
+
+For `openrouter/deepseek`, proxy rewrites `"model":"claude-sonnet-4"` -> `"model":"anthropic/claude-sonnet-4"` via string replace (fast, no JSON unmarshal). Add `modelMap` per member.
+
+## Metrics
+
+Scrape `:9090/metrics`. Alert on `proant_member_cooldown==1` for all members, `rate(proant_failovers_total[5m])` spike, `proant_tokens_total` per member for cost.
+
+## Limits
+
+- No streaming chunked passthrough yet (buffers body). For streaming, switch `forward` to `httputil.ReverseProxy` with `FlushInterval`.
+- Redis down = fail-open (all healthy), sticky miss.

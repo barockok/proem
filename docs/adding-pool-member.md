@@ -1,0 +1,73 @@
+# Adding a Pool Member — pro-ant
+
+## 1. Get token
+
+- Anthropic Pro/Max: `sk-ant-oat01-...` via Claude Code OAuth login (store in env `CLAUDE_OAT_X` or file `/run/secrets/oat_x`).
+- Anthropic API: `sk-ant-api03-...` via console.
+- OpenRouter: `sk-or-...` via openrouter.ai/keys (supports modelMap).
+- DeepSeek: via deepseek platform.
+
+## 2. Add to pool.yaml
+
+```yaml
+members:
+  # existing
+  - id: anthropic-a
+    type: anthropic_oauth
+    cred: {env: CLAUDE_OAT_A}
+    baseURL: https://api.anthropic.com
+
+  # new: anthropic second oat
+  - id: anthropic-b
+    type: anthropic_oauth
+    cred: {env: CLAUDE_OAT_B}
+    baseURL: https://api.anthropic.com
+    weight: 1
+
+  # new: openrouter heterogeneous
+  - id: openrouter-1
+    type: openrouter
+    cred: {env: OPENROUTER_KEY}
+    baseURL: https://openrouter.ai/api/v1
+    modelMap:
+      claude-sonnet-4-20250514: anthropic/claude-sonnet-4
+      claude-3-5-sonnet-20241022: anthropic/claude-3.5-sonnet
+    weight: 2  # higher weight = more traffic
+
+  # optional disable without removing
+  # - id: old-member
+  #   type: generic
+  #   cred: {file: /run/secrets/old}
+  #   baseURL: https://api.deepseek.com
+  #   enabled: false
+```
+
+Validate: `id` unique, `type` one of `anthropic_oauth|anthropic_api|openrouter|deepseek|generic`, `cred.env` or `cred.file`, `baseURL https://`, `weight >=0`.
+
+## 3. Hot reload
+
+Save `pool.yaml` — proxy watcher validates and swaps atomically. Bad yaml: old pool kept, `proant_config_reloads_total{result="error"}` inc, log line.
+
+Check: `curl localhost:9090/metrics | grep config_reloads`.
+
+## 4. Verify
+
+```bash
+# should route to new member on next request (hash or random)
+ANTHROPIC_BASE_URL=http://localhost:8080 npm run your-sdk-client
+# check metrics: requests per member
+curl -s localhost:9090/metrics | grep proant_requests_total
+# check cooldown not set
+redis-cli --raw keys "cooldown:*"
+```
+
+## 5. Remove
+
+Delete entry, save. No restart.
+
+## Tips
+
+- Weight: set OpenRouter lower if you want Anthropic primary with fallback.
+- CooldownSec: override per member (`cooldownSec: 3600`).
+- Secrets: prefer `{file: /run/secrets/...}` with Docker/K8s secrets over env.
+- `enabled: false` to keep entry but exclude from routing (handy for rotation).
