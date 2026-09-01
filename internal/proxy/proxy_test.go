@@ -12,9 +12,12 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/barockok/pro-ant/internal/client"
+	"github.com/barockok/pro-ant/internal/metrics"
 	"github.com/barockok/pro-ant/internal/pool"
 	"github.com/barockok/pro-ant/internal/router"
 	"github.com/barockok/pro-ant/internal/store"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -426,5 +429,88 @@ func TestAuthHeadersMissingCredFile(t *testing.T) {
 	m := pool.Member{Type: pool.TypeGeneric, Cred: pool.CredRef{File: "/no/such/cred/file"}}
 	if _, err := AuthHeaders(m); err == nil {
 		t.Fatal("want error for unreadable cred file")
+	}
+}
+
+func TestMetricsCarryClientLabel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_1", "type": "message",
+			"usage": map[string]int{"input_tokens": 11, "output_tokens": 7},
+		})
+	}))
+	defer srv.Close()
+
+	os.Setenv("TEST_OAT", "tok")
+	defer os.Unsetenv("TEST_OAT")
+	m := pool.Member{ID: "member-x", Type: pool.TypeGeneric, Cred: pool.CredRef{Env: "TEST_OAT"}, BaseURL: srv.URL}
+	h := NewHandler(&mockLoader{pool: &pool.Pool{Members: []pool.Member{m}}}, router.New(nil), nil, "none", time.Second)
+
+	before := testutil.ToFloat64(metrics.Tokens.WithLabelValues("agent-metrics", "member-x", "output"))
+
+	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req.WithContext(withClient(req.Context(), "agent-metrics")))
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+
+	after := testutil.ToFloat64(metrics.Tokens.WithLabelValues("agent-metrics", "member-x", "output"))
+	if after-before != 7 {
+		t.Fatalf("output tokens not attributed to client: delta %v", after-before)
+	}
+	if got := testutil.ToFloat64(metrics.Requests.WithLabelValues("agent-metrics", "member-x", "200")); got != 1 {
+		t.Fatalf("requests not attributed to client: %v", got)
+	}
+}
+
+func TestUnauthenticatedRequestsLabelledUnknown(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"id":"ok"}`))
+	}))
+	defer srv.Close()
+
+	os.Setenv("TEST_OAT", "tok")
+	defer os.Unsetenv("TEST_OAT")
+	m := pool.Member{ID: "member-anon", Type: pool.TypeGeneric, Cred: pool.CredRef{Env: "TEST_OAT"}, BaseURL: srv.URL}
+	h := NewHandler(&mockLoader{pool: &pool.Pool{Members: []pool.Member{m}}}, router.New(nil), nil, "none", time.Second)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`)))
+
+	if got := testutil.ToFloat64(metrics.Requests.WithLabelValues(client.UnknownClient, "member-anon", "200")); got != 1 {
+		t.Fatalf("handler reached without Auth should label client=unknown, got %v", got)
+	}
+}
+
+func TestServeHTTPExhaustsPoolWhenAllMembersCooled(t *testing.T) {
+	ctx := context.Background()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	c := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer c.Close()
+	st := store.NewWithClient(c)
+
+	m := pool.Member{ID: "cooled", Type: pool.TypeGeneric, Cred: pool.CredRef{Env: "TEST_OAT"}, BaseURL: "https://127.0.0.1:1"}
+	st.SetCooldown(ctx, "cooled", time.Hour)
+
+	h := NewHandler(&mockLoader{pool: &pool.Pool{Members: []pool.Member{m}}}, router.New(st), st, "lb", time.Second)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`)))
+
+	if rec.Code != 502 {
+		t.Fatalf("all members cooled should end in 502, got %d", rec.Code)
+	}
+}
+
+func TestServeHTTPNilPool(t *testing.T) {
+	h := NewHandler(&mockLoader{pool: nil}, router.New(nil), nil, "lb", time.Second)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/messages", nil))
+	if rec.Code != 503 {
+		t.Fatalf("nil pool should be 503, got %d", rec.Code)
 	}
 }

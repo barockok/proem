@@ -46,6 +46,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		http.Error(w, "no pool members", http.StatusServiceUnavailable)
 		return
 	}
+	clientName := ClientName(req.Context())
 	bodyBytes, _ := CloneBody(req)
 	// also capture session id
 	sessionID := req.Header.Get("x-claude-code-session-id")
@@ -83,10 +84,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 		status, respHeader, respBody, err := h.forward(req.Context(), req, bodyBytes, *member)
 		if err != nil {
-			metrics.Requests.WithLabelValues(member.ID, "error").Inc()
+			metrics.Requests.WithLabelValues(clientName, member.ID, "error").Inc()
 			// treat transport error as failover
 			h.cooldown(member, 0)
-			metrics.Failovers.WithLabelValues(member.ID, "transport").Inc()
+			metrics.Failovers.WithLabelValues(clientName, member.ID, "transport").Inc()
 			lastStatus = http.StatusBadGateway
 			continue
 		}
@@ -97,7 +98,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if should {
 			coaTTL := failover.CooldownTTL(ttl, member.CooldownSec, member.Type == pool.TypeAnthropicOAuth || member.Type == pool.TypeAnthropicAPI)
 			h.cooldown(member, coaTTL)
-			metrics.Failovers.WithLabelValues(member.ID, reason).Inc()
+			metrics.Failovers.WithLabelValues(clientName, member.ID, reason).Inc()
 			metrics.CooldownGauge.WithLabelValues(member.ID).Set(1)
 			continue
 		}
@@ -106,9 +107,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			_ = h.store.SetSticky(req.Context(), sessionID, member.ID, time.Hour)
 		}
 		// record tokens from usage if present
-		recordTokens(member.ID, respBody)
-		metrics.Requests.WithLabelValues(member.ID, itoa(status)).Inc()
-		metrics.Latency.WithLabelValues(member.ID).Observe(time.Since(start).Seconds())
+		recordTokens(clientName, member.ID, respBody)
+		metrics.Requests.WithLabelValues(clientName, member.ID, itoa(status)).Inc()
+		metrics.Latency.WithLabelValues(clientName, member.ID).Observe(time.Since(start).Seconds())
 		// write response
 		for k, vals := range respHeader {
 			for _, v := range vals {
@@ -201,7 +202,7 @@ func filterNotTried(members []pool.Member, tried map[string]bool) []pool.Member 
 	return out
 }
 
-func recordTokens(memberID string, body []byte) {
+func recordTokens(clientName, memberID string, body []byte) {
 	var env struct {
 		Usage *struct {
 			InputTokens  int `json:"input_tokens"`
@@ -212,10 +213,10 @@ func recordTokens(memberID string, body []byte) {
 		return
 	}
 	if env.Usage.InputTokens > 0 {
-		metrics.Tokens.WithLabelValues(memberID, "input").Add(float64(env.Usage.InputTokens))
+		metrics.Tokens.WithLabelValues(clientName, memberID, "input").Add(float64(env.Usage.InputTokens))
 	}
 	if env.Usage.OutputTokens > 0 {
-		metrics.Tokens.WithLabelValues(memberID, "output").Add(float64(env.Usage.OutputTokens))
+		metrics.Tokens.WithLabelValues(clientName, memberID, "output").Add(float64(env.Usage.OutputTokens))
 	}
 	_ = prometheus.NewCounter
 }

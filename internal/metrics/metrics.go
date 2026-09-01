@@ -8,24 +8,24 @@ import (
 var (
 	Requests = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proant_requests_total",
-		Help: "Total requests by member and status",
-	}, []string{"member", "code"})
+		Help: "Total requests by client, member and status",
+	}, []string{"client", "member", "code"})
 
 	Failovers = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proant_failovers_total",
-		Help: "Failovers by from_member and reason",
-	}, []string{"from_member", "reason"})
+		Help: "Failovers by client, from_member and reason",
+	}, []string{"client", "from_member", "reason"})
 
 	Tokens = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proant_tokens_total",
-		Help: "Tokens by member and type",
-	}, []string{"member", "type"})
+		Help: "Tokens by client, member and type",
+	}, []string{"client", "member", "type"})
 
 	Latency = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "proant_upstream_latency_seconds",
 		Help:    "Upstream latency",
 		Buckets: prometheus.DefBuckets,
-	}, []string{"member"})
+	}, []string{"client", "member"})
 
 	CooldownGauge = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "proant_member_cooldown",

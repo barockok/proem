@@ -34,15 +34,50 @@ jobs:
       - run: go build -o /tmp/pro-ant ./cmd/proxy
       - name: Smoke test the binary
         run: |
-          cp pool.yaml.example pool.yaml
-          CLAUDE_OAT_A=t CLAUDE_OAT_B=t OPENROUTER_KEY=t \
-            /tmp/pro-ant --config pool.yaml --redis-url redis://localhost:6379/0 \
+          # A deliberately unroutable upstream: the smoke test must exercise the
+          # proxy's own behaviour without calling a third-party API.
+          cat > pool.yaml <<'YAML'
+          members:
+            - id: unreachable
+              type: anthropic_oauth
+              cred: {env: SMOKE_OAT}
+              baseURL: https://127.0.0.1:1
+          YAML
+
+          TOKEN="sk-ant-oat01-ci-smoke-token"
+          DIGEST=$(printf '%s' "$TOKEN" | sha256sum | cut -d' ' -f1)
+          printf 'clients:\n  - name: agent-ci\n    tokenSHA256: %s\n' "$DIGEST" > clients.yaml
+
+          SMOKE_OAT=t /tmp/pro-ant --config pool.yaml --clients clients.yaml \
+            --redis-url redis://localhost:6379/0 \
             --listen :18080 --metrics-addr :19090 &
           for i in $(seq 1 50); do
             curl -fsS http://localhost:18080/health && break || sleep 0.2
           done
           curl -fsS http://localhost:18080/health | grep -q ok
           curl -fsS http://localhost:19090/metrics | grep -q proant_
+
+          status() {
+            curl -s -o /dev/null -w '%{http_code}' -XPOST http://localhost:18080/v1/messages "$@" -d '{}'
+          }
+
+          code=$(status)
+          test "$code" = "401" || { echo "expected 401 without a token, got $code"; exit 1; }
+
+          code=$(status -H "Authorization: Bearer sk-ant-oat01-not-issued")
+          test "$code" = "401" || { echo "expected 401 for an unknown token, got $code"; exit 1; }
+
+          # The issued token authenticates; the unroutable upstream then yields 502.
+          code=$(status -H "Authorization: Bearer $TOKEN")
+          test "$code" = "502" || { echo "expected 502 after auth, got $code"; exit 1; }
+
+          # Usage is attributed to the named client.
+          curl -fsS http://localhost:19090/metrics | grep -q 'client="agent-ci"' \
+            || { echo "metrics missing the client label"; exit 1; }
+
+      - name: Smoke test issue-token
+        run: /tmp/pro-ant issue-token agent-ci | grep -q "sk-ant-oat01-"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

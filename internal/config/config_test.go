@@ -97,3 +97,22 @@ func TestParseArgsBadDuration(t *testing.T) {
 		t.Fatal("want error for bad duration")
 	}
 }
+
+func TestClientsPathDefaultAndOverride(t *testing.T) {
+	if DefaultConfig().ClientsPath != "./clients.yaml" {
+		t.Fatalf("default clients path: %s", DefaultConfig().ClientsPath)
+	}
+	cfg, err := ParseArgs("pro-ant", []string{"--clients", "/etc/clients.yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientsPath != "/etc/clients.yaml" {
+		t.Fatalf("clients path: %s", cfg.ClientsPath)
+	}
+}
+
+func TestEmptyClientsPathRejected(t *testing.T) {
+	if _, err := ParseArgs("pro-ant", []string{"--clients", ""}); err == nil {
+		t.Fatal("empty --clients must be rejected: the proxy is fail-closed")
+	}
+}
