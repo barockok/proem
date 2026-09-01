@@ -13,7 +13,14 @@ import (
 	"github.com/barockok/proem/internal/config"
 )
 
+// version is stamped at build time with -ldflags "-X main.version=<tag>".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 && (os.Args[1] == "version" || os.Args[1] == "--version" || os.Args[1] == "-version") {
+		fmt.Println("proem", version)
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "issue-token" {
 		if len(os.Args) != 3 || os.Args[2] == "" {
 			log.Fatal(fmt.Errorf("usage: proem issue-token <client-name>"))
