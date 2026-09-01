@@ -1,4 +1,4 @@
-# How It Works — pro-ant
+# How It Works — Proem
 
 ## Auth variants (validated + live-captured)
 
@@ -21,7 +21,7 @@ The client token is authenticated and then removed; the pool credential is injec
 
 ## Request flow
 
-1. SDK sets `ANTHROPIC_BASE_URL=http://pro-ant:8080` and `CLAUDE_CODE_OAUTH_TOKEN=<issued token>`, then sends `POST /v1/messages`.
+1. SDK sets `ANTHROPIC_BASE_URL=http://proem:8080` and `CLAUDE_CODE_OAUTH_TOKEN=<issued token>`, then sends `POST /v1/messages`.
 2. `proxy.Auth` resolves the token against the client registry. Unknown token → 401, disabled client → 403. On success the client name goes on the request context and the caller's `Authorization` / `x-api-key` headers are stripped.
 3. `handler.ServeHTTP` clones body for replay, reads pool `atomic` snapshot, extracts `x-claude-code-session-id`.
 4. Loop:
@@ -41,7 +41,7 @@ For `openrouter/deepseek`, proxy rewrites `"model":"claude-sonnet-4"` -> `"model
 
 ## Metrics
 
-Scrape `:9090/metrics`. `requests`, `tokens`, `latency` and `failovers` all carry a `client` label for per-agent attribution. Alert on `proant_member_cooldown==1` for all members, `rate(proant_failovers_total[5m])` spike, `proant_tokens_total` per member for cost.
+Scrape `:9090/metrics`. `requests`, `tokens`, `latency` and `failovers` all carry a `client` label for per-agent attribution. Alert on `proem_member_cooldown==1` for all members, `rate(proem_failovers_total[5m])` spike, `proem_tokens_total` per member for cost.
 
 ## Limits
 

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/barockok/pro-ant/internal/failover"
-	"github.com/barockok/pro-ant/internal/metrics"
-	"github.com/barockok/pro-ant/internal/pool"
-	"github.com/barockok/pro-ant/internal/router"
-	"github.com/barockok/pro-ant/internal/store"
+	"github.com/barockok/proem/internal/failover"
+	"github.com/barockok/proem/internal/metrics"
+	"github.com/barockok/proem/internal/pool"
+	"github.com/barockok/proem/internal/router"
+	"github.com/barockok/proem/internal/store"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

@@ -1,4 +1,4 @@
-# pro-ant Implementation Plan
+# proem Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -26,9 +26,9 @@
 ## File Structure
 
 ```
-pro-ant/
+proem/
 ├── go.mod
-├── cmd/proxy/main.go              # flag parse, pool load, redis, server start
+├── cmd/proem/main.go              # flag parse, pool load, redis, server start
 ├── internal/
 │   ├── pool/loader.go             # File watch, validate, atomic Store, yaml unmarshal
 │   ├── pool/types.go              # Member, Pool structs, validation
@@ -66,7 +66,7 @@ pro-ant/
 - Consumes: spec pool yaml shape
 - Produces: `pool.Member`, `pool.Pool`, `config.Config` used by loader/router/forwarder
 
-- [ ] Step 1: `go mod init github.com/barockok/pro-ant`, add deps `github.com/go-chi/chi/v5`, `github.com/redis/go-redis/v9`, `github.com/fsnotify/fsnotify`, `github.com/prometheus/client_golang`, `gopkg.in/yaml.v3`
+- [ ] Step 1: `go mod init github.com/barockok/proem`, add deps `github.com/go-chi/chi/v5`, `github.com/redis/go-redis/v9`, `github.com/fsnotify/fsnotify`, `github.com/prometheus/client_golang`, `gopkg.in/yaml.v3`
 - [ ] Step 2: Write `internal/pool/types.go` structs `Member{ID, Type, Cred, BaseURL, ModelMap, Weight, Enabled, CooldownSec}`, `Pool{Members []Member}`, validation func
 - [ ] Step 3: Write `internal/config/config.go` flags: `--config`, `--redis-url`, `--listen`, `--metrics-addr`, `--sticky-mode lb|redis`, timeouts
 - [ ] Step 4: Write `pool.yaml.example` with 2 anthropic_oauth + 1 openrouter sample
@@ -178,7 +178,7 @@ pro-ant/
 
 **Files:**
 - Create: `internal/metrics/metrics.go`
-- Modify: `cmd/proxy/main.go` to expose /metrics, /healthz, /readyz
+- Modify: `cmd/proem/main.go` to expose /metrics, /healthz, /readyz
 
 **Interfaces:**
 - Produces: Prometheus handlers
@@ -194,7 +194,7 @@ pro-ant/
 ### Task 9: Main binary + wiring + Dockerfile
 
 **Files:**
-- Create: `cmd/proxy/main.go`
+- Create: `cmd/proem/main.go`
 - Create: `Dockerfile`, `Makefile`
 
 - [ ] Step 1: Implement main: flag parse, init loader (load pool.yaml), init redis store, init metrics, init router, create handler, start `http.Server` on :8080 and metrics on :9090, handle SIGTERM/SIGHUP

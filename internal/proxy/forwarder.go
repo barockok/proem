@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/barockok/pro-ant/internal/pool"
+	"github.com/barockok/proem/internal/pool"
 )
 
 const (

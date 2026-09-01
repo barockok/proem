@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/barockok/pro-ant/internal/client"
+	"github.com/barockok/proem/internal/client"
 )
 
 const (

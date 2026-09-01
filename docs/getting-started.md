@@ -1,4 +1,4 @@
-# Getting Started — pro-ant
+# Getting Started — Proem
 
 Stateless Go reverse proxy pooling Anthropic OAuth + API + heterogeneous OpenRouter/DeepSeek upstreams. Failover on 5h rate limits via body-checked 429/401/529 + cooldown TTL. Redis for cooldown + optional sticky.
 
@@ -6,7 +6,7 @@ Stateless Go reverse proxy pooling Anthropic OAuth + API + heterogeneous OpenRou
 
 ```bash
 # 1. clone
-git clone git@github.com:barockok/pro-ant.git && cd pro-ant
+git clone git@github.com:barockok/proem.git && cd proem
 
 # 2. pool config
 cp pool.yaml.example pool.yaml
@@ -20,11 +20,11 @@ docker run -d -p 6379:6379 redis:7-alpine
 
 # 4. issue a token for each agent that will call the proxy
 cp clients.yaml.example clients.yaml   # then replace the sample entries
-go run ./cmd/proxy issue-token agent-maria
+go run ./cmd/proem issue-token agent-maria
 # paste the printed `- name/tokenSHA256` block into clients.yaml
 
 # 5. run
-go run ./cmd/proxy --config ./pool.yaml --clients ./clients.yaml --redis-url redis://localhost:6379/0 --listen :8080 --metrics-addr :9090 --sticky-mode lb
+go run ./cmd/proem --config ./pool.yaml --clients ./clients.yaml --redis-url redis://localhost:6379/0 --listen :8080 --metrics-addr :9090 --sticky-mode lb
 
 # 6. point the client at the proxy, using the token from step 4
 export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # the issued token, not a real one
@@ -37,10 +37,10 @@ The proxy is fail-closed: it will not start without `--clients`, and requests wi
 Docker:
 
 ```bash
-docker build -t pro-ant:local .
+docker build -t proem:local .
 docker run -p 8080:8080 -p 9090:9090 \
   -v $PWD/pool.yaml:/pool.yaml -v $PWD/clients.yaml:/clients.yaml \
-  --env-file .env pro-ant:local \
+  --env-file .env proem:local \
   --config /pool.yaml --clients /clients.yaml --redis-url redis://host.docker.internal:6379/0
 ```
 

@@ -28,7 +28,7 @@ func TestStickyModeConstants(t *testing.T) {
 }
 
 func TestParseArgsDefaults(t *testing.T) {
-	cfg, err := ParseArgs("pro-ant", nil)
+	cfg, err := ParseArgs("proem", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestParseArgsDefaults(t *testing.T) {
 }
 
 func TestParseArgsOverrides(t *testing.T) {
-	cfg, err := ParseArgs("pro-ant", []string{
+	cfg, err := ParseArgs("proem", []string{
 		"--config", "/etc/pool.yaml",
 		"--redis-url", "redis://cache:6379/2",
 		"--listen", ":9000",
@@ -70,7 +70,7 @@ func TestParseArgsOverrides(t *testing.T) {
 
 func TestParseArgsEveryStickyMode(t *testing.T) {
 	for _, mode := range []StickyMode{StickyLB, StickyRedis, StickyNone} {
-		cfg, err := ParseArgs("pro-ant", []string{"--sticky-mode", string(mode)})
+		cfg, err := ParseArgs("proem", []string{"--sticky-mode", string(mode)})
 		if err != nil {
 			t.Fatalf("%s: %v", mode, err)
 		}
@@ -81,19 +81,19 @@ func TestParseArgsEveryStickyMode(t *testing.T) {
 }
 
 func TestParseArgsInvalidStickyMode(t *testing.T) {
-	if _, err := ParseArgs("pro-ant", []string{"--sticky-mode", "bogus"}); err == nil {
+	if _, err := ParseArgs("proem", []string{"--sticky-mode", "bogus"}); err == nil {
 		t.Fatal("want error for invalid sticky mode")
 	}
 }
 
 func TestParseArgsUnknownFlag(t *testing.T) {
-	if _, err := ParseArgs("pro-ant", []string{"--nope"}); err == nil {
+	if _, err := ParseArgs("proem", []string{"--nope"}); err == nil {
 		t.Fatal("want error for unknown flag")
 	}
 }
 
 func TestParseArgsBadDuration(t *testing.T) {
-	if _, err := ParseArgs("pro-ant", []string{"--read-timeout", "not-a-duration"}); err == nil {
+	if _, err := ParseArgs("proem", []string{"--read-timeout", "not-a-duration"}); err == nil {
 		t.Fatal("want error for bad duration")
 	}
 }
@@ -102,7 +102,7 @@ func TestClientsPathDefaultAndOverride(t *testing.T) {
 	if DefaultConfig().ClientsPath != "./clients.yaml" {
 		t.Fatalf("default clients path: %s", DefaultConfig().ClientsPath)
 	}
-	cfg, err := ParseArgs("pro-ant", []string{"--clients", "/etc/clients.yaml"})
+	cfg, err := ParseArgs("proem", []string{"--clients", "/etc/clients.yaml"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func TestClientsPathDefaultAndOverride(t *testing.T) {
 }
 
 func TestEmptyClientsPathRejected(t *testing.T) {
-	if _, err := ParseArgs("pro-ant", []string{"--clients", ""}); err == nil {
+	if _, err := ParseArgs("proem", []string{"--clients", ""}); err == nil {
 		t.Fatal("empty --clients must be rejected: the proxy is fail-closed")
 	}
 }

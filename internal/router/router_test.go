@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/barockok/pro-ant/internal/pool"
-	"github.com/barockok/pro-ant/internal/store"
+	"github.com/barockok/proem/internal/pool"
+	"github.com/barockok/proem/internal/store"
 	"github.com/redis/go-redis/v9"
 )
 

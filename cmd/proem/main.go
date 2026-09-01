@@ -8,15 +8,15 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/barockok/pro-ant/internal/app"
-	"github.com/barockok/pro-ant/internal/client"
-	"github.com/barockok/pro-ant/internal/config"
+	"github.com/barockok/proem/internal/app"
+	"github.com/barockok/proem/internal/client"
+	"github.com/barockok/proem/internal/config"
 )
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "issue-token" {
 		if len(os.Args) != 3 || os.Args[2] == "" {
-			log.Fatal(fmt.Errorf("usage: pro-ant issue-token <client-name>"))
+			log.Fatal(fmt.Errorf("usage: proem issue-token <client-name>"))
 		}
 		if err := client.IssueAndDescribe(os.Args[2], os.Stdout); err != nil {
 			log.Fatal(err)

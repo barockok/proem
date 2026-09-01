@@ -5,8 +5,8 @@ import (
 	"hash/crc32"
 	"math/rand"
 
-	"github.com/barockok/pro-ant/internal/pool"
-	"github.com/barockok/pro-ant/internal/store"
+	"github.com/barockok/proem/internal/pool"
+	"github.com/barockok/proem/internal/store"
 )
 
 type Router struct {

@@ -31,7 +31,7 @@ jobs:
       - run: go vet ./...
       - name: Test with coverage gate
         run: ./scripts/coverage.sh
-      - run: go build -o /tmp/pro-ant ./cmd/proxy
+      - run: go build -o /tmp/proem ./cmd/proem
       - name: Smoke test the binary
         run: |
           # A deliberately unroutable upstream: the smoke test must exercise the
@@ -48,14 +48,14 @@ jobs:
           DIGEST=$(printf '%s' "$TOKEN" | sha256sum | cut -d' ' -f1)
           printf 'clients:\n  - name: agent-ci\n    tokenSHA256: %s\n' "$DIGEST" > clients.yaml
 
-          SMOKE_OAT=t /tmp/pro-ant --config pool.yaml --clients clients.yaml \
+          SMOKE_OAT=t /tmp/proem --config pool.yaml --clients clients.yaml \
             --redis-url redis://localhost:6379/0 \
             --listen :18080 --metrics-addr :19090 &
           for i in $(seq 1 50); do
             curl -fsS http://localhost:18080/health && break || sleep 0.2
           done
           curl -fsS http://localhost:18080/health | grep -q ok
-          curl -fsS http://localhost:19090/metrics | grep -q proant_
+          curl -fsS http://localhost:19090/metrics | grep -q proem_
 
           status() {
             curl -s -o /dev/null -w '%{http_code}' -XPOST http://localhost:18080/v1/messages "$@" -d '{}'
@@ -76,7 +76,7 @@ jobs:
             || { echo "metrics missing the client label"; exit 1; }
 
       - name: Smoke test issue-token
-        run: /tmp/pro-ant issue-token agent-ci | grep -q "sk-ant-oat01-"
+        run: /tmp/proem issue-token agent-ci | grep -q "sk-ant-oat01-"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -93,4 +93,4 @@ jobs:
         with:
           context: .
           push: false
-          tags: pro-ant:ci
+          tags: proem:ci

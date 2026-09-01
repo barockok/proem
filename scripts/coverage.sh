@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Runs the test suite and enforces a minimum coverage percentage over the
-# internal packages. cmd/proxy is excluded: it is a thin main() whose wiring
+# internal packages. cmd/proem is excluded: it is a thin main() whose wiring
 # lives in internal/app and is covered there.
 set -euo pipefail
 

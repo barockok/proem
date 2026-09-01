@@ -13,8 +13,8 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/barockok/pro-ant/internal/client"
-	"github.com/barockok/pro-ant/internal/config"
+	"github.com/barockok/proem/internal/client"
+	"github.com/barockok/proem/internal/config"
 )
 
 func writePool(t *testing.T, body string) string {
@@ -160,8 +160,8 @@ func TestMetricsHandler(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("metrics status %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "proant_config_reloads_total") {
-		t.Fatal("expected pro-ant metrics in output")
+	if !strings.Contains(rec.Body.String(), "proem_config_reloads_total") {
+		t.Fatal("expected proem metrics in output")
 	}
 }
 

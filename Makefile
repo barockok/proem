@@ -1,7 +1,7 @@
 .PHONY: build test vet cover cover-gate docker lint fmt
 
 build:
-	go build -o bin/pro-ant ./cmd/proxy
+	go build -o bin/proem ./cmd/proem
 
 test:
 	go test ./... -race -count=1 -coverprofile=coverage.out
@@ -20,7 +20,7 @@ vet:
 	go vet ./...
 
 docker:
-	docker build -t pro-ant:local .
+	docker build -t proem:local .
 
 lint: vet
 	golangci-lint run ./... || true
