@@ -1,7 +1,7 @@
-# Architecture — pro-ant
+# Architecture — Proem
 
 ```
-client (SDK) --issued token--> pro-ant pods (stateless, LB) --pool credential--> upstreams
+client (SDK) --issued token--> proem pods (stateless, LB) --pool credential--> upstreams
                                     |     |  |
                      clients.yaml (auth)  |  pool.yaml (fsnotify atomic.Pointer[Pool])
                                           |

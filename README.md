@@ -1,4 +1,8 @@
-# pro-ant
+# Proem
+
+> **proem** *(n.)* — from Latin *prooemium*, an introductory discourse; a preamble.
+>
+> Every request gets a preface before the main text: the proxy authenticates the caller, chooses which credential speaks for them, and hands the conversation to the upstream. The agent writes the book; Proem writes the front matter.
 
 Stateless Go reverse proxy that pools Anthropic Pro/Max OAuth tokens (`sk-ant-oat01-…`) alongside heterogeneous upstreams (Anthropic API, OpenRouter, DeepSeek). When a member hits its 5h limit the proxy fails over to the next healthy one and puts the exhausted member on a Redis cooldown. Token usage, failovers and latency are exported to Prometheus.
 
@@ -28,10 +32,10 @@ export CLAUDE_OAT_A=sk-ant-oat01-...   # secrets come from env or files
 docker run -d -p 6379:6379 redis:7-alpine
 
 # issue a token per agent; paste the printed entry into clients.yaml
-go run ./cmd/proxy issue-token agent-maria > /dev/null && \
-  go run ./cmd/proxy issue-token agent-maria
+go run ./cmd/proem issue-token agent-maria > /dev/null && \
+  go run ./cmd/proem issue-token agent-maria
 
-go run ./cmd/proxy --config ./pool.yaml --clients ./clients.yaml \
+go run ./cmd/proem --config ./pool.yaml --clients ./clients.yaml \
   --redis-url redis://localhost:6379/0
 ```
 
@@ -40,7 +44,7 @@ Health check on `:8080/health`, Prometheus metrics on `:9090/metrics`. Full walk
 ## Features
 
 - **Per-agent tokens** — each caller gets an issued token; the proxy authenticates it, stores only its hash, and swaps it for a pooled credential upstream.
-- **Usage attribution** — `proant_tokens_total{client="agent-maria"}` shows exactly what each agent consumed.
+- **Usage attribution** — `proem_tokens_total{client="agent-maria"}` shows exactly what each agent consumed.
 - **Failover on rate limits** — body-checked `429/401/529` plus `Retry-After`, with per-member cooldown in Redis (5h default for Anthropic).
 - **Heterogeneous pool** — mix OAuth, API-key and third-party members; `modelMap` rewrites model names per upstream.
 - **Hot reload** — `pool.yaml` is watched and swapped atomically; invalid edits keep the previous pool.
@@ -53,7 +57,7 @@ Health check on `:8080/health`, Prometheus metrics on `:9090/metrics`. Full walk
 ```bash
 make test      # go test ./... -race with coverage profile
 make vet       # go vet ./...
-make build     # binary into bin/pro-ant
+make build     # binary into bin/proem
 ./scripts/coverage.sh   # tests + enforce the internal coverage minimum
 ```
 

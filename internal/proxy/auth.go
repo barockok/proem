@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/barockok/pro-ant/internal/client"
+	"github.com/barockok/proem/internal/client"
 )
 
 type ctxKey int

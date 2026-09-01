@@ -16,9 +16,9 @@ jobs:
           cache: true
       - name: Build binaries
         run: |
-          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o pro-ant-linux-amd64 ./cmd/proxy
-          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o pro-ant-linux-arm64 ./cmd/proxy
-          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o pro-ant-darwin-arm64 ./cmd/proxy
+          GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" -o proem-linux-amd64 ./cmd/proem
+          GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o proem-linux-arm64 ./cmd/proem
+          GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o proem-darwin-arm64 ./cmd/proem
       - name: Docker meta
         uses: docker/metadata-action@v5
         id: meta
@@ -37,4 +37,4 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
       - uses: softprops/action-gh-release@v1
         with:
-          files: pro-ant-*
+          files: proem-*

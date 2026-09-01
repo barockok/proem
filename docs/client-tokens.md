@@ -6,14 +6,14 @@ Callers never hold a real Anthropic credential. They hold a proxy-issued token; 
 
 ```
 agent-maria ──token A──┐
-                       ├──> pro-ant ──(pool credential)──> Anthropic / OpenRouter / …
+                       ├──> proem ──(pool credential)──> Anthropic / OpenRouter / …
 agent-sora  ──token B──┘
 ```
 
 ## Issue a token
 
 ```bash
-pro-ant issue-token agent-maria
+proem issue-token agent-maria
 ```
 
 ```
@@ -62,7 +62,7 @@ The file is validated on load and on every change: duplicate names, duplicate to
 Pass it with `--clients`:
 
 ```bash
-pro-ant --config pool.yaml --clients clients.yaml --redis-url redis://localhost:6379/0
+proem --config pool.yaml --clients clients.yaml --redis-url redis://localhost:6379/0
 ```
 
 **The proxy is fail-closed.** It will not start without a client registry, and any request without a recognised token is rejected. There is no anonymous mode.
@@ -95,20 +95,20 @@ The client name is a label on every request-scoped metric:
 
 ```promql
 # tokens consumed per agent over 24h
-sum by (client) (increase(proant_tokens_total[24h]))
+sum by (client) (increase(proem_tokens_total[24h]))
 
 # output tokens for one agent, split by which pool member served it
-sum by (member) (increase(proant_tokens_total{client="agent-maria",type="output"}[24h]))
+sum by (member) (increase(proem_tokens_total{client="agent-maria",type="output"}[24h]))
 
 # which agent is burning through rate limits
-sum by (client) (rate(proant_failovers_total[5m]))
+sum by (client) (rate(proem_failovers_total[5m]))
 
 # p95 latency per agent
 histogram_quantile(0.95,
-  sum by (le, client) (rate(proant_upstream_latency_seconds_bucket[5m])))
+  sum by (le, client) (rate(proem_upstream_latency_seconds_bucket[5m])))
 ```
 
-Labelled metrics: `proant_requests_total`, `proant_tokens_total`, `proant_upstream_latency_seconds`, `proant_failovers_total`.
+Labelled metrics: `proem_requests_total`, `proem_tokens_total`, `proem_upstream_latency_seconds`, `proem_failovers_total`.
 
 Series count scales with clients × members, and the latency histogram multiplies that by its buckets. At a few dozen agents this is unremarkable; past a few hundred, consider dropping the client label from the histogram in your scrape config.
 

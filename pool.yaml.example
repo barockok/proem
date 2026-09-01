@@ -1,4 +1,4 @@
-# pro-ant pool example
+# proem pool example
 # Secrets via env or file; never plain token here.
 members:
   - id: anthropic-a

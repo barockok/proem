@@ -1,4 +1,4 @@
-# Adding a Pool Member — pro-ant
+# Adding a Pool Member — Proem
 
 ## 1. Get token
 
@@ -46,7 +46,7 @@ Validate: `id` unique, `type` one of `anthropic_oauth|anthropic_api|openrouter|d
 
 ## 3. Hot reload
 
-Save `pool.yaml` — proxy watcher validates and swaps atomically. Bad yaml: old pool kept, `proant_config_reloads_total{result="error"}` inc, log line.
+Save `pool.yaml` — proxy watcher validates and swaps atomically. Bad yaml: old pool kept, `proem_config_reloads_total{result="error"}` inc, log line.
 
 Check: `curl localhost:9090/metrics | grep config_reloads`.
 
@@ -56,7 +56,7 @@ Check: `curl localhost:9090/metrics | grep config_reloads`.
 # should route to new member on next request (hash or random)
 ANTHROPIC_BASE_URL=http://localhost:8080 npm run your-sdk-client
 # check metrics: requests per member
-curl -s localhost:9090/metrics | grep proant_requests_total
+curl -s localhost:9090/metrics | grep proem_requests_total
 # check cooldown not set
 redis-cli --raw keys "cooldown:*"
 ```

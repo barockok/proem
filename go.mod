@@ -1,4 +1,4 @@
-module github.com/barockok/pro-ant
+module github.com/barockok/proem
 
 go 1.25.4
 
