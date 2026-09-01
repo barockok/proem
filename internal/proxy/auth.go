@@ -3,10 +3,12 @@ package proxy
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/barockok/proem/internal/client"
+	"github.com/barockok/proem/internal/metrics"
 )
 
 type ctxKey int
@@ -33,30 +35,59 @@ type registryLoader interface{ Active() *client.Registry }
 // Auth authenticates callers against the client registry. The presented token
 // is stripped from the request so it never reaches an upstream: the pool
 // member's own credential is injected downstream instead.
-func Auth(loader registryLoader, next http.Handler) http.Handler {
+//
+// Rejections are counted and logged so a leaked or probed token is visible.
+// The token itself is never logged; a short digest fingerprint is recorded
+// instead, which is enough to correlate repeated attempts.
+func Auth(loader registryLoader, logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reject := func(status int, reason, errType, message string, attrs ...slog.Attr) {
+			metrics.AuthFailures.WithLabelValues(reason).Inc()
+			logger.LogAttrs(r.Context(), slog.LevelWarn, "auth failed",
+				append([]slog.Attr{
+					slog.String("reason", reason),
+					slog.String("ip", ClientIP(r)),
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.String("user_agent", r.UserAgent()),
+				}, attrs...)...)
+			writeAuthError(w, status, errType, message)
+		}
+
 		token := presentedToken(r)
 		if token == "" {
-			writeAuthError(w, http.StatusUnauthorized, "authentication_error",
+			reject(http.StatusUnauthorized, "missing_credentials", "authentication_error",
 				"missing credentials: set CLAUDE_CODE_OAUTH_TOKEN to the token issued for this agent")
 			return
 		}
 
 		c, ok := loader.Active().Lookup(token)
 		if !ok {
-			writeAuthError(w, http.StatusUnauthorized, "authentication_error",
-				"invalid credentials: this token is not registered with the proxy")
+			reject(http.StatusUnauthorized, "unknown_token", "authentication_error",
+				"invalid credentials: this token is not registered with the proxy",
+				slog.String("token_fp", tokenFingerprint(token)))
 			return
 		}
 		if !c.IsEnabled() {
-			writeAuthError(w, http.StatusForbidden, "permission_error",
-				"client "+c.Name+" is disabled")
+			reject(http.StatusForbidden, "client_disabled", "permission_error",
+				"client "+c.Name+" is disabled",
+				slog.String("client", c.Name))
 			return
 		}
 
 		stripClientCredentials(r)
+		if s := scopeFrom(r.Context()); s != nil {
+			s.client = c.Name // so the access log, which wraps this, can see it
+		}
 		next.ServeHTTP(w, r.WithContext(withClient(r.Context(), c.Name)))
 	})
+}
+
+// tokenFingerprint returns a short, non-reversible handle for a rejected
+// token so repeated attempts can be correlated in logs without recording the
+// credential itself.
+func tokenFingerprint(token string) string {
+	return client.HashToken(token)[:12]
 }
 
 // presentedToken pulls the caller's credential from either header the Anthropic

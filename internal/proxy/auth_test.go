@@ -1,8 +1,11 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +22,16 @@ const (
 type stubRegistry struct{ reg *client.Registry }
 
 func (s stubRegistry) Active() *client.Registry { return s.reg }
+
+// testLogger writes to buf (or discards when nil) so tests can assert on
+// exactly what reaches the log.
+func testLogger(buf *bytes.Buffer) *slog.Logger {
+	var w io.Writer = io.Discard
+	if buf != nil {
+		w = buf
+	}
+	return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
 
 func testRegistry(t *testing.T) stubRegistry {
 	t.Helper()
@@ -43,7 +56,7 @@ func echoClient(seen *string) http.Handler {
 
 func TestAuthAcceptsBearerToken(t *testing.T) {
 	var seen string
-	h := Auth(testRegistry(t), echoClient(&seen))
+	h := Auth(testRegistry(t), testLogger(nil), echoClient(&seen))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	req.Header.Set("Authorization", "Bearer "+mariaToken)
@@ -60,7 +73,7 @@ func TestAuthAcceptsBearerToken(t *testing.T) {
 
 func TestAuthAcceptsApiKeyHeader(t *testing.T) {
 	var seen string
-	h := Auth(testRegistry(t), echoClient(&seen))
+	h := Auth(testRegistry(t), testLogger(nil), echoClient(&seen))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	req.Header.Set("x-api-key", mariaToken)
@@ -74,7 +87,7 @@ func TestAuthAcceptsApiKeyHeader(t *testing.T) {
 
 func TestAuthBearerIsCaseInsensitive(t *testing.T) {
 	var seen string
-	h := Auth(testRegistry(t), echoClient(&seen))
+	h := Auth(testRegistry(t), testLogger(nil), echoClient(&seen))
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	req.Header.Set("Authorization", "bearer  "+mariaToken)
 	rec := httptest.NewRecorder()
@@ -85,7 +98,7 @@ func TestAuthBearerIsCaseInsensitive(t *testing.T) {
 }
 
 func TestAuthRejectsMissingCredentials(t *testing.T) {
-	h := Auth(testRegistry(t), echoClient(new(string)))
+	h := Auth(testRegistry(t), testLogger(nil), echoClient(new(string)))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", nil))
 
@@ -96,7 +109,7 @@ func TestAuthRejectsMissingCredentials(t *testing.T) {
 }
 
 func TestAuthRejectsUnknownToken(t *testing.T) {
-	h := Auth(testRegistry(t), echoClient(new(string)))
+	h := Auth(testRegistry(t), testLogger(nil), echoClient(new(string)))
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	req.Header.Set("Authorization", "Bearer sk-ant-oat01-not-issued")
 	rec := httptest.NewRecorder()
@@ -109,7 +122,7 @@ func TestAuthRejectsUnknownToken(t *testing.T) {
 }
 
 func TestAuthRejectsDisabledClient(t *testing.T) {
-	h := Auth(testRegistry(t), echoClient(new(string)))
+	h := Auth(testRegistry(t), testLogger(nil), echoClient(new(string)))
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 	req.Header.Set("Authorization", "Bearer "+soraToken)
 	rec := httptest.NewRecorder()
@@ -122,7 +135,7 @@ func TestAuthRejectsDisabledClient(t *testing.T) {
 }
 
 func TestAuthRejectsMalformedAuthorization(t *testing.T) {
-	h := Auth(testRegistry(t), echoClient(new(string)))
+	h := Auth(testRegistry(t), testLogger(nil), echoClient(new(string)))
 	for _, v := range []string{"Basic abc123", "Bearer", "   ", mariaToken} {
 		req := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
 		req.Header.Set("Authorization", v)
@@ -139,7 +152,7 @@ func TestAuthRejectsMalformedAuthorization(t *testing.T) {
 // override the injected OAuth token.
 func TestAuthStripsCallerCredentials(t *testing.T) {
 	var gotAuth, gotAPIKey string
-	h := Auth(testRegistry(t), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Auth(testRegistry(t), testLogger(nil), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		gotAPIKey = r.Header.Get("x-api-key")
 	}))
@@ -159,7 +172,7 @@ func TestAuthStripsCallerCredentials(t *testing.T) {
 
 func TestAuthPreservesOtherHeaders(t *testing.T) {
 	var beta, session string
-	h := Auth(testRegistry(t), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := Auth(testRegistry(t), testLogger(nil), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		beta = r.Header.Get("anthropic-beta")
 		session = r.Header.Get("x-claude-code-session-id")
 	}))

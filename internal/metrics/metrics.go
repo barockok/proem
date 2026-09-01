@@ -37,6 +37,11 @@ var (
 		Help: "Sticky hits",
 	}, []string{"result"})
 
+	AuthFailures = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "proem_auth_failures_total",
+		Help: "Rejected requests by reason (missing_credentials, unknown_token, client_disabled)",
+	}, []string{"reason"})
+
 	ConfigReloads = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proem_config_reloads_total",
 		Help: "Config reloads",

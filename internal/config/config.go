@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,9 @@ type Config struct {
 	ListenAddr      string
 	MetricsAddr     string
 	StickyMode      StickyMode
+	AccessLog       bool
+	LogFormat       string
+	TrustedProxies  []string
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	UpstreamTimeout time.Duration
@@ -39,6 +43,8 @@ func DefaultConfig() Config {
 		ListenAddr:      ":8080",
 		MetricsAddr:     ":9090",
 		StickyMode:      StickyLB,
+		AccessLog:       true,
+		LogFormat:       "text",
 		ReadTimeout:     10 * time.Second,
 		WriteTimeout:    60 * time.Second,
 		UpstreamTimeout: 60 * time.Second,
@@ -54,7 +60,7 @@ func ParseFlags() (Config, error) {
 // ParseFlags so tests can drive it without touching the global flag set.
 func ParseArgs(name string, args []string) (Config, error) {
 	cfg := DefaultConfig()
-	var sticky string
+	var sticky, trustedProxies string
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.ConfigPath, "config", cfg.ConfigPath, "path to pool.yaml")
@@ -63,11 +69,26 @@ func ParseArgs(name string, args []string) (Config, error) {
 	fs.StringVar(&cfg.ListenAddr, "listen", cfg.ListenAddr, "proxy listen addr")
 	fs.StringVar(&cfg.MetricsAddr, "metrics-addr", cfg.MetricsAddr, "metrics listen addr")
 	fs.StringVar(&sticky, "sticky-mode", string(cfg.StickyMode), "sticky mode: lb|redis|none")
+	fs.BoolVar(&cfg.AccessLog, "access-log", cfg.AccessLog, "log one line per request (never includes bodies)")
+	fs.StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "log output format: text|json")
+	fs.StringVar(&trustedProxies, "trusted-proxies", "", "comma-separated CIDRs or IPs whose X-Forwarded-For is believed; empty means never trust it")
 	fs.DurationVar(&cfg.ReadTimeout, "read-timeout", cfg.ReadTimeout, "read timeout")
 	fs.DurationVar(&cfg.WriteTimeout, "write-timeout", cfg.WriteTimeout, "write timeout")
 	fs.DurationVar(&cfg.UpstreamTimeout, "upstream-timeout", cfg.UpstreamTimeout, "upstream request timeout")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
+	}
+
+	switch cfg.LogFormat {
+	case "text", "json":
+	default:
+		return cfg, fmt.Errorf("invalid --log-format %q: want text|json", cfg.LogFormat)
+	}
+
+	for _, entry := range strings.Split(trustedProxies, ",") {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			cfg.TrustedProxies = append(cfg.TrustedProxies, entry)
+		}
 	}
 
 	if cfg.ClientsPath == "" {
