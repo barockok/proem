@@ -1,6 +1,7 @@
 package config
 
 import (
+	"reflect"
 	"testing"
 	"time"
 )
@@ -32,7 +33,7 @@ func TestParseArgsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg != DefaultConfig() {
+	if !reflect.DeepEqual(cfg, DefaultConfig()) {
 		t.Fatalf("empty args should equal defaults, got %+v", cfg)
 	}
 }
@@ -114,5 +115,56 @@ func TestClientsPathDefaultAndOverride(t *testing.T) {
 func TestEmptyClientsPathRejected(t *testing.T) {
 	if _, err := ParseArgs("proem", []string{"--clients", ""}); err == nil {
 		t.Fatal("empty --clients must be rejected: the proxy is fail-closed")
+	}
+}
+
+func TestObservabilityDefaults(t *testing.T) {
+	c := DefaultConfig()
+	if !c.AccessLog {
+		t.Fatal("access log should default on")
+	}
+	if c.LogFormat != "text" {
+		t.Fatalf("log format: %s", c.LogFormat)
+	}
+	if len(c.TrustedProxies) != 0 {
+		t.Fatal("X-Forwarded-For must not be trusted by default")
+	}
+}
+
+func TestParseArgsTrustedProxies(t *testing.T) {
+	cfg, err := ParseArgs("proem", []string{"--trusted-proxies", "10.0.0.0/8, 192.168.1.1 , "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.TrustedProxies) != 2 {
+		t.Fatalf("want 2 entries, got %v", cfg.TrustedProxies)
+	}
+	if cfg.TrustedProxies[0] != "10.0.0.0/8" || cfg.TrustedProxies[1] != "192.168.1.1" {
+		t.Fatalf("entries not trimmed: %v", cfg.TrustedProxies)
+	}
+}
+
+func TestParseArgsLogFormat(t *testing.T) {
+	for _, f := range []string{"text", "json"} {
+		cfg, err := ParseArgs("proem", []string{"--log-format", f})
+		if err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		if cfg.LogFormat != f {
+			t.Fatalf("got %s", cfg.LogFormat)
+		}
+	}
+	if _, err := ParseArgs("proem", []string{"--log-format", "xml"}); err == nil {
+		t.Fatal("want error for unsupported log format")
+	}
+}
+
+func TestParseArgsAccessLogToggle(t *testing.T) {
+	cfg, err := ParseArgs("proem", []string{"--access-log=false"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AccessLog {
+		t.Fatal("--access-log=false should disable the access log")
 	}
 }

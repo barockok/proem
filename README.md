@@ -22,6 +22,7 @@ export ANTHROPIC_BASE_URL=http://localhost:8080
 | [How it works](docs/how-it-works.md) | Auth variants, failover and cooldown rules, model mapping, metrics |
 | [Adding a pool member](docs/adding-pool-member.md) | Add, weight, disable or remove an upstream — with hot reload |
 | [Client tokens](docs/client-tokens.md) | Issue tokens to agents, revoke them, attribute usage per agent |
+| [Observability](docs/observability.md) | Access log, auth-failure alerts, client IP behind proxies, metrics |
 | [Design spec](docs/2026-08-31-claude-proxy-subs-design.md) | Original design document |
 
 ## Quick start
@@ -50,7 +51,7 @@ Health check on `:8080/health`, Prometheus metrics on `:9090/metrics`. Full walk
 - **Hot reload** — `pool.yaml` is watched and swapped atomically; invalid edits keep the previous pool.
 - **Optional stickiness** — `lb` (hash on session id, no Redis), `redis` (pinned sessions), or `none`.
 - **Fail-open** — if Redis is unavailable the proxy keeps serving with cooldown and stickiness disabled.
-- **Observability** — requests, failovers, tokens, latency, cooldown state and config reloads as Prometheus series.
+- **Observability** — structured access log and per-reason auth-failure metrics; requests, failovers, tokens, latency, cooldown state and config reloads as Prometheus series. Bodies, query strings and tokens are never logged.
 
 ## Development
 

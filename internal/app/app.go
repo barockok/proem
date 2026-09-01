@@ -7,10 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/barockok/proem/internal/client"
+	"github.com/barockok/proem/internal/clientip"
 	"github.com/barockok/proem/internal/config"
 	"github.com/barockok/proem/internal/metrics"
 	"github.com/barockok/proem/internal/pool"
@@ -38,6 +41,13 @@ type App struct {
 // connects to Redis. A Redis failure is non-fatal: the proxy runs fail-open
 // with cooldown and sticky disabled.
 func New(cfg config.Config) (*App, error) {
+	logger := newLogger(cfg)
+
+	resolver, err := clientip.NewResolver(cfg.TrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("trusted proxies: %w", err)
+	}
+
 	loader, err := pool.NewLoader(cfg.ConfigPath)
 	if err != nil {
 		return nil, err
@@ -76,7 +86,13 @@ func New(cfg config.Config) (*App, error) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.Handle("/*", proxy.Auth(clients, h))
+	// RealIP runs outermost so both the access log and auth rejections see the
+	// caller's address; AccessLog wraps Auth so rejected requests are logged too.
+	var handler http.Handler = proxy.Auth(clients, logger, h)
+	if cfg.AccessLog {
+		handler = proxy.AccessLog(logger, handler)
+	}
+	mux.Handle("/*", proxy.RealIP(resolver, handler))
 
 	return &App{
 		cfg:         cfg,
@@ -135,6 +151,15 @@ func (a *App) Run(ctx context.Context) error {
 	_ = srv.Shutdown(shutCtx)
 	_ = metricsSrv.Shutdown(shutCtx)
 	return runErr
+}
+
+// newLogger builds the structured logger used for access and auth logging.
+func newLogger(cfg config.Config) *slog.Logger {
+	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
+	if cfg.LogFormat == "json" {
+		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
+	}
+	return slog.New(slog.NewTextHandler(os.Stdout, opts))
 }
 
 // Close stops the config watcher and releases the Redis connection.

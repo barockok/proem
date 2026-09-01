@@ -292,3 +292,41 @@ func TestHealthEndpointNeedsNoAuth(t *testing.T) {
 		t.Fatalf("health must stay unauthenticated for probes, got %d", rec.Code)
 	}
 }
+
+func TestNewRejectsBadTrustedProxies(t *testing.T) {
+	cfg := testConfig(t, writePool(t, validPool))
+	cfg.TrustedProxies = []string{"not-a-cidr"}
+	if _, err := New(cfg); err == nil {
+		t.Fatal("malformed trusted proxy entry must fail startup")
+	}
+}
+
+func TestAccessLogCanBeDisabled(t *testing.T) {
+	cfg := testConfig(t, writePool(t, validPool))
+	cfg.AccessLog = false
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	// still serves normally with logging off
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func TestJSONLogFormatStarts(t *testing.T) {
+	cfg := testConfig(t, writePool(t, validPool))
+	cfg.LogFormat = "json"
+	a, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+	if a.Handler() == nil {
+		t.Fatal("handler nil")
+	}
+}
