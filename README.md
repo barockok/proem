@@ -55,6 +55,7 @@ Health check on `:8080/health`, Prometheus metrics on `:9090/metrics`. Full walk
 ## Development
 
 ```bash
+proem version  # print the build's version
 make test      # go test ./... -race with coverage profile
 make vet       # go vet ./...
 make build     # binary into bin/proem
