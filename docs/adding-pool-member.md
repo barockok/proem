@@ -74,4 +74,4 @@ Delete entry, save. No restart.
 
 ---
 
-[← Back to README](../README.md) · [Getting started](getting-started.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)
+[← Back to README](../README.md) · [Client tokens](client-tokens.md) · [Getting started](getting-started.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)

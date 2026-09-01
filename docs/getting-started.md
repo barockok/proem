@@ -18,19 +18,30 @@ export OPENROUTER_KEY=sk-or-...
 # 3. redis
 docker run -d -p 6379:6379 redis:7-alpine
 
-# 4. run
-go run ./cmd/proxy --config ./pool.yaml --redis-url redis://localhost:6379/0 --listen :8080 --metrics-addr :9090 --sticky-mode lb
+# 4. issue a token for each agent that will call the proxy
+cp clients.yaml.example clients.yaml   # then replace the sample entries
+go run ./cmd/proxy issue-token agent-maria
+# paste the printed `- name/tokenSHA256` block into clients.yaml
 
-# 5. use as Anthropic base URL (claude-agent-sdk / SDK)
+# 5. run
+go run ./cmd/proxy --config ./pool.yaml --clients ./clients.yaml --redis-url redis://localhost:6379/0 --listen :8080 --metrics-addr :9090 --sticky-mode lb
+
+# 6. point the client at the proxy, using the token from step 4
+export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # the issued token, not a real one
 export ANTHROPIC_BASE_URL=http://localhost:8080
 # then run your SDK client — requests fan out through pool with failover
 ```
+
+The proxy is fail-closed: it will not start without `--clients`, and requests without a recognised token get a 401. See [client tokens](client-tokens.md).
 
 Docker:
 
 ```bash
 docker build -t pro-ant:local .
-docker run -p 8080:8080 -p 9090:9090 -v $PWD/pool.yaml:/pool.yaml --env-file .env pro-ant:local --config /pool.yaml --redis-url redis://host.docker.internal:6379/0
+docker run -p 8080:8080 -p 9090:9090 \
+  -v $PWD/pool.yaml:/pool.yaml -v $PWD/clients.yaml:/clients.yaml \
+  --env-file .env pro-ant:local \
+  --config /pool.yaml --clients /clients.yaml --redis-url redis://host.docker.internal:6379/0
 ```
 
 Health: `curl localhost:8080/health` → `ok`. Metrics: `curl localhost:9090/metrics`.
@@ -61,4 +72,4 @@ Set via `--sticky-mode` and client header `x-claude-code-session-id` (SDK sends 
 
 ---
 
-[← Back to README](../README.md) · [Getting started](getting-started.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)
+[← Back to README](../README.md) · [Client tokens](client-tokens.md) · [Architecture](architecture.md) · [How it works](how-it-works.md) · [Adding a pool member](adding-pool-member.md)

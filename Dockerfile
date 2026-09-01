@@ -8,6 +8,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /pro-ant ./c
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=builder /pro-ant /pro-ant
 COPY pool.yaml.example /pool.yaml.example
+COPY clients.yaml.example /clients.yaml.example
 EXPOSE 8080 9090
 ENTRYPOINT ["/pro-ant"]
-CMD ["--config","/pool.yaml","--listen",":8080","--metrics-addr",":9090"]
+CMD ["--config","/pool.yaml","--clients","/clients.yaml","--listen",":8080","--metrics-addr",":9090"]

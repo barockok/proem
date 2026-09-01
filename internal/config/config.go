@@ -20,6 +20,7 @@ const (
 // Config holds proxy runtime options.
 type Config struct {
 	ConfigPath      string
+	ClientsPath     string
 	RedisURL        string
 	ListenAddr      string
 	MetricsAddr     string
@@ -33,6 +34,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		ConfigPath:      "./pool.yaml",
+		ClientsPath:     "./clients.yaml",
 		RedisURL:        "redis://localhost:6379/0",
 		ListenAddr:      ":8080",
 		MetricsAddr:     ":9090",
@@ -56,6 +58,7 @@ func ParseArgs(name string, args []string) (Config, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&cfg.ConfigPath, "config", cfg.ConfigPath, "path to pool.yaml")
+	fs.StringVar(&cfg.ClientsPath, "clients", cfg.ClientsPath, "path to clients.yaml (client tokens; required)")
 	fs.StringVar(&cfg.RedisURL, "redis-url", cfg.RedisURL, "redis URL (redis://...)")
 	fs.StringVar(&cfg.ListenAddr, "listen", cfg.ListenAddr, "proxy listen addr")
 	fs.StringVar(&cfg.MetricsAddr, "metrics-addr", cfg.MetricsAddr, "metrics listen addr")
@@ -65,6 +68,10 @@ func ParseArgs(name string, args []string) (Config, error) {
 	fs.DurationVar(&cfg.UpstreamTimeout, "upstream-timeout", cfg.UpstreamTimeout, "upstream request timeout")
 	if err := fs.Parse(args); err != nil {
 		return cfg, err
+	}
+
+	if cfg.ClientsPath == "" {
+		return cfg, fmt.Errorf("--clients is required: the proxy will not start without a client token registry")
 	}
 
 	switch StickyMode(sticky) {

@@ -1,0 +1,23 @@
+# pro-ant client registry.
+#
+# Each entry is one caller of the proxy. Mint a token with:
+#
+#   pro-ant issue-token agent-maria
+#
+# It prints the token once (give it to the agent as CLAUDE_CODE_OAUTH_TOKEN)
+# and the digest to paste here. Only the digest is stored, so this file is not
+# itself a secret and unknown tokens are rejected with 401.
+#
+# The `name` becomes the `client` label on usage metrics, e.g.
+#   proant_tokens_total{client="agent-maria",member="anthropic-a",type="output"}
+clients:
+  - name: agent-maria
+    tokenSHA256: 6bc4a596d198c83d80bd44a4e46e3f4007e12a35a086a8452abf9f79b0ec1f66
+
+  - name: agent-sora
+    tokenSHA256: 2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
+
+  # Revoke access without deleting the entry:
+  # - name: agent-retired
+  #   tokenSHA256: ...
+  #   enabled: false

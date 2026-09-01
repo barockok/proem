@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/barockok/pro-ant/internal/client"
 	"github.com/barockok/pro-ant/internal/config"
 )
 
@@ -35,17 +36,32 @@ func freePort(t *testing.T) string {
 	return fmt.Sprintf("127.0.0.1:%d", l.Addr().(*net.TCPAddr).Port)
 }
 
+// validPool points at an unroutable address on purpose: tests must never
+// reach the real API, and a fast dial failure is enough to prove routing.
 const validPool = `
 members:
   - id: a
     type: anthropic_oauth
     cred: {env: TEST_APP_OAT}
-    baseURL: https://api.anthropic.com
+    baseURL: https://127.0.0.1:1
 `
+
+const testToken = "sk-ant-oat01-test-token"
+
+func writeClients(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "clients.yaml")
+	body := "clients:\n  - name: agent-test\n    tokenSHA256: " + client.HashToken(testToken) + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func testConfig(t *testing.T, poolPath string) config.Config {
 	cfg := config.DefaultConfig()
 	cfg.ConfigPath = poolPath
+	cfg.ClientsPath = writeClients(t)
 	cfg.RedisURL = ""
 	cfg.ListenAddr = freePort(t)
 	cfg.MetricsAddr = freePort(t)
@@ -117,13 +133,18 @@ func TestProxyRouteReachesHandler(t *testing.T) {
 	}
 	defer a.Close()
 
-	// The single pool member points at the real API and has no credential set,
-	// so the request fails upstream — but reaching a proxy error (not 404)
-	// proves the catch-all route is wired to the failover handler.
+	// The pool member is unroutable, so the request fails upstream — but
+	// reaching a proxy error (not 404, not 401) proves the request passed
+	// authentication and landed on the failover handler.
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer "+testToken)
 	rec := httptest.NewRecorder()
-	a.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+	a.Handler().ServeHTTP(rec, req)
 	if rec.Code == http.StatusNotFound {
 		t.Fatal("catch-all route not wired to proxy handler")
+	}
+	if rec.Code == http.StatusUnauthorized {
+		t.Fatal("valid token rejected")
 	}
 }
 
@@ -225,5 +246,49 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 	if err := a.Close(); err != nil {
 		t.Fatalf("second close: %v", err)
+	}
+}
+
+func TestNewRejectsBadClientsRegistry(t *testing.T) {
+	cfg := testConfig(t, writePool(t, validPool))
+	cfg.ClientsPath = filepath.Join(t.TempDir(), "missing.yaml")
+	if _, err := New(cfg); err == nil {
+		t.Fatal("missing clients.yaml must fail startup")
+	}
+
+	empty := filepath.Join(t.TempDir(), "clients.yaml")
+	os.WriteFile(empty, []byte("clients: []"), 0o644)
+	cfg2 := testConfig(t, writePool(t, validPool))
+	cfg2.ClientsPath = empty
+	if _, err := New(cfg2); err == nil {
+		t.Fatal("empty clients.yaml must fail startup")
+	}
+}
+
+func TestUnauthenticatedRequestIsRejected(t *testing.T) {
+	a, err := New(testConfig(t, writePool(t, validPool)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader("{}")))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated request should be 401, got %d", rec.Code)
+	}
+}
+
+func TestHealthEndpointNeedsNoAuth(t *testing.T) {
+	a, err := New(testConfig(t, writePool(t, validPool)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	rec := httptest.NewRecorder()
+	a.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("health must stay unauthenticated for probes, got %d", rec.Code)
 	}
 }

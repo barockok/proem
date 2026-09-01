@@ -5,10 +5,12 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
+	"github.com/barockok/pro-ant/internal/client"
 	"github.com/barockok/pro-ant/internal/config"
 	"github.com/barockok/pro-ant/internal/metrics"
 	"github.com/barockok/pro-ant/internal/pool"
@@ -21,10 +23,11 @@ import (
 
 // App holds the running proxy's components.
 type App struct {
-	cfg    config.Config
-	loader *pool.Loader
-	store  *store.Store
-	done   chan struct{}
+	cfg     config.Config
+	loader  *pool.Loader
+	clients *client.Loader
+	store   *store.Store
+	done    chan struct{}
 
 	handler     http.Handler
 	metricsMux  http.Handler
@@ -40,9 +43,19 @@ func New(cfg config.Config) (*App, error) {
 		return nil, err
 	}
 
+	clients, err := client.NewLoader(cfg.ClientsPath)
+	if err != nil {
+		_ = loader.Close()
+		return nil, fmt.Errorf("clients: %w", err)
+	}
+
 	done := make(chan struct{})
 	loader.Watch(done, func(e error) {
 		log.Printf("pool reload error: %v", e)
+		metrics.ConfigReloads.WithLabelValues("error").Inc()
+	})
+	clients.Watch(done, func(e error) {
+		log.Printf("clients reload error: %v", e)
 		metrics.ConfigReloads.WithLabelValues("error").Inc()
 	})
 	metrics.ConfigReloads.WithLabelValues("success").Inc()
@@ -63,11 +76,12 @@ func New(cfg config.Config) (*App, error) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.Handle("/*", h)
+	mux.Handle("/*", proxy.Auth(clients, h))
 
 	return &App{
 		cfg:         cfg,
 		loader:      loader,
+		clients:     clients,
 		store:       st,
 		done:        done,
 		handler:     mux,
@@ -132,6 +146,9 @@ func (a *App) Close() error {
 	}
 	if a.loader != nil {
 		_ = a.loader.Close()
+	}
+	if a.clients != nil {
+		_ = a.clients.Close()
 	}
 	if a.store != nil {
 		return a.store.Close()
