@@ -59,6 +59,14 @@ clients:
 
 The file is validated on load and on every change: duplicate names, duplicate tokens, malformed digests or an empty list are all rejected. Like `pool.yaml`, it is hot-reloaded — save the file and the new registry applies to the next request. A rejected edit is logged and the previous registry stays in force, so a typo cannot lock out every agent.
 
+Like the pool file, the registry may be written as YAML or JSON — YAML 1.2 is a
+superset of JSON, so both are parsed identically, with the same validation and
+hot reload:
+
+```json
+{"clients":[{"name":"agent-maria","tokenSHA256":"6bc4a596d198c83d80bd44a4e46e3f4007e12a35a086a8452abf9f79b0ec1f66"}]}
+```
+
 Pass it with `--clients`:
 
 ```bash

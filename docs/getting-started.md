@@ -61,6 +61,9 @@ members:
     modelMap: {"claude-sonnet-4": "anthropic/claude-sonnet-4"} # only for openrouter/deepseek
 ```
 
+Both `pool.yaml` and `clients.yaml` may equally be written as JSON — see
+[adding a pool member](adding-pool-member.md) for an example.
+
 Hot reload: edit `pool.yaml` — proxy fsnotify reloads atomically, bad yaml keeps old pool.
 
 ## Sticky
