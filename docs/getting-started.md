@@ -34,6 +34,19 @@ export ANTHROPIC_BASE_URL=http://localhost:8080
 
 The proxy is fail-closed: it will not start without `--clients`, and requests without a recognised token get a 401. See [client tokens](client-tokens.md).
 
+### macOS
+
+The released darwin binaries are ad-hoc signed, so they run on Apple Silicon as
+downloaded. macOS still quarantines anything fetched with a browser, which
+shows up as "cannot be opened because the developer cannot be verified":
+
+```bash
+xattr -d com.apple.quarantine ./proem-darwin-arm64   # only if downloaded via a browser
+```
+
+Downloads made with `curl` or `gh release download` are not quarantined. The
+binaries are not notarised, so Gatekeeper will not treat them as identified.
+
 Docker:
 
 ```bash
