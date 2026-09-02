@@ -43,10 +43,26 @@ For `openrouter/deepseek`, proxy rewrites `"model":"claude-sonnet-4"` -> `"model
 
 Scrape `:9090/metrics`. `requests`, `tokens`, `latency` and `failovers` all carry a `client` label for per-agent attribution. Alert on `proem_member_cooldown==1` for all members, `rate(proem_failovers_total[5m])` spike, `proem_tokens_total` per member for cost.
 
+## Streaming and failover
+
+The proxy is transparent to the response shape: a client that asks to stream gets a stream, and one that does not gets a single body. Neither is buffered unnecessarily, and bytes are never rewritten.
+
+That has to coexist with failover, which needs to see a response before deciding to retry — and bytes already sent cannot be recalled. The decision is therefore made from the status and headers alone, before anything is committed:
+
+1. `failover.MayFailover(status, headers)` asks whether this response could still trigger a retry (a `429/401/529`, or any response carrying `Retry-After`).
+2. If it could, the body is read into memory and `ShouldFailover` inspects it. These are small error envelopes. On a match the member is cooled and the next one is tried.
+3. Otherwise the response is committed and copied straight through, flushed chunk by chunk, so a stream reaches the caller as it is produced.
+
+A usage observer reads along with the copy without altering or delaying it, extracting token counts from either a JSON `usage` object or the `message_start` / `message_delta` events of a stream. Upstreams disagree about which event carries which counter, so every counter is merged from whichever event reports it.
+
+Once streaming has begun the response is committed: an error arriving mid-stream is passed through to the client rather than failed over, because the client has already seen part of the answer.
+
+`--upstream-timeout` bounds how long a member may take to *respond*, not how long it may stream: it maps to the transport's response-header timeout, so a long generation is never truncated.
+
 ## Limits
 
-- No streaming chunked passthrough yet (buffers body). For streaming, switch `forward` to `httputil.ReverseProxy` with `FlushInterval`.
 - Redis down = fail-open (all healthy), sticky miss.
+- A member that fails after the first byte cannot be failed over.
 
 ---
 

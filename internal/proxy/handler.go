@@ -3,7 +3,6 @@ package proxy
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/barockok/proem/internal/pool"
 	"github.com/barockok/proem/internal/router"
 	"github.com/barockok/proem/internal/store"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 type Handler struct {
@@ -29,16 +27,29 @@ func NewHandler(loader interface{ Active() *pool.Pool }, r *router.Router, s *st
 	if upstreamTimeout <= 0 {
 		upstreamTimeout = 60 * time.Second
 	}
+	// The timeout bounds how long an upstream may take to respond, not how
+	// long it may stream. http.Client.Timeout would cover the entire body
+	// read and so would cut off any generation that ran longer than it.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = upstreamTimeout
 	return &Handler{
 		loader:     loader,
 		router:     r,
 		store:      s,
-		client:     &http.Client{Timeout: upstreamTimeout},
+		client:     &http.Client{Transport: transport},
 		stickyMode: stickyMode,
 	}
 }
 
-// ServeHTTP implements failover loop.
+// ServeHTTP routes a request to a pool member, failing over to another member
+// when one is rate limited.
+//
+// The proxy is transparent to the response shape. Failover needs to inspect a
+// response, but bytes already sent cannot be recalled, so the decision is made
+// from the status and headers before anything is committed to the client:
+// a response that could still fail over is buffered and examined, and any
+// other response is streamed straight through, unbuffered and unmodified,
+// whether it is a single JSON object or an event stream.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	start := time.Now()
 	poolObj := h.loader.Active()
@@ -48,19 +59,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	clientName := ClientName(req.Context())
 	bodyBytes, _ := CloneBody(req)
-	// also capture session id
 	sessionID := req.Header.Get("x-claude-code-session-id")
 	if sessionID == "" {
 		sessionID = req.Header.Get("x-session-id")
 	}
 
 	tried := make(map[string]bool)
-	var lastStatus int
-	var lastBody []byte
+	var last *bufferedResponse
 
 	for attempt := 0; attempt < len(poolObj.Members); attempt++ {
-		// pick next member (filter cooldown internally)
-		// we need to filter tried manually
 		candidates := filterNotTried(poolObj.Members, tried)
 		if len(candidates) == 0 {
 			break
@@ -71,7 +78,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			break
 		}
 
-		// sticky hit metric
 		if trySticky && h.store != nil {
 			if pinned, ok := h.store.GetSticky(req.Context(), sessionID); ok && pinned == member.ID {
 				metrics.StickyHits.WithLabelValues("hit").Inc()
@@ -82,56 +88,118 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 		tried[member.ID] = true
 
-		status, respHeader, respBody, err := h.forward(req.Context(), req, bodyBytes, *member)
+		resp, err := h.send(req, bodyBytes, *member)
 		if err != nil {
 			metrics.Requests.WithLabelValues(clientName, member.ID, "error").Inc()
-			// treat transport error as failover
 			h.cooldown(member, 0)
 			metrics.Failovers.WithLabelValues(clientName, member.ID, "transport").Inc()
-			lastStatus = http.StatusBadGateway
+			last = &bufferedResponse{status: http.StatusBadGateway}
 			continue
 		}
-		lastStatus = status
-		lastBody = respBody
 
-		should, ttl, reason := failover.ShouldFailover(status, respBody, respHeader)
-		if should {
-			coaTTL := failover.CooldownTTL(ttl, member.CooldownSec, member.Type == pool.TypeAnthropicOAuth || member.Type == pool.TypeAnthropicAPI)
-			h.cooldown(member, coaTTL)
-			metrics.Failovers.WithLabelValues(clientName, member.ID, reason).Inc()
-			metrics.CooldownGauge.WithLabelValues(member.ID).Set(1)
-			continue
-		}
-		// success: pin sticky if redis mode
-		if h.stickyMode == "redis" && sessionID != "" && h.store != nil {
-			_ = h.store.SetSticky(req.Context(), sessionID, member.ID, time.Hour)
-		}
-		// record tokens from usage if present
-		recordTokens(clientName, member.ID, respBody)
-		metrics.Requests.WithLabelValues(clientName, member.ID, itoa(status)).Inc()
-		metrics.Latency.WithLabelValues(clientName, member.ID).Observe(time.Since(start).Seconds())
-		// write response
-		for k, vals := range respHeader {
-			for _, v := range vals {
-				w.Header().Add(k, v)
+		// Only a response that could still fail over is read up front; every
+		// other response is committed to the client without buffering.
+		if failover.MayFailover(resp.StatusCode, resp.Header) {
+			buffered := bufferResponse(resp)
+			should, ttl, reason := failover.ShouldFailover(buffered.status, buffered.body, buffered.header)
+			if should {
+				ttlSec := failover.CooldownTTL(ttl, member.CooldownSec,
+					member.Type == pool.TypeAnthropicOAuth || member.Type == pool.TypeAnthropicAPI)
+				h.cooldown(member, ttlSec)
+				metrics.Failovers.WithLabelValues(clientName, member.ID, reason).Inc()
+				metrics.CooldownGauge.WithLabelValues(member.ID).Set(1)
+				last = buffered
+				continue
 			}
+			h.finish(w, req, clientName, member, sessionID, start, buffered.status,
+				buffered.header, bytes.NewReader(buffered.body))
+			return
 		}
-		w.WriteHeader(status)
-		_, _ = w.Write(respBody)
-		// clear cooldown gauge on success
-		metrics.CooldownGauge.WithLabelValues(member.ID).Set(0)
+
+		h.finish(w, req, clientName, member, sessionID, start, resp.StatusCode, resp.Header, resp.Body)
+		_ = resp.Body.Close()
 		return
 	}
-	// all failed
-	if lastBody != nil {
-		w.WriteHeader(lastStatus)
-		_, _ = w.Write(lastBody)
+
+	if last != nil && last.body != nil {
+		writeHeaders(w, last.header)
+		w.WriteHeader(last.status)
+		_, _ = w.Write(last.body)
 		return
 	}
 	http.Error(w, "all upstreams failed", http.StatusBadGateway)
 }
 
-func (h *Handler) forward(ctx context.Context, orig *http.Request, body []byte, m pool.Member) (int, http.Header, []byte, error) {
+// finish commits a chosen response to the client and records what it carried.
+// The body is copied through as it arrives, flushing each chunk so a stream
+// reaches the caller incrementally, while a usage observer reads along without
+// altering or delaying the bytes.
+func (h *Handler) finish(w http.ResponseWriter, req *http.Request, clientName string, member *pool.Member,
+	sessionID string, start time.Time, status int, header http.Header, body io.Reader) {
+
+	if h.stickyMode == "redis" && sessionID != "" && h.store != nil {
+		_ = h.store.SetSticky(req.Context(), sessionID, member.ID, time.Hour)
+	}
+
+	writeHeaders(w, header)
+	w.WriteHeader(status)
+
+	observer := newUsageObserver(header.Get("Content-Type"))
+	copyStream(w, body, observer)
+
+	recordUsage(clientName, member.ID, observer.Result())
+	metrics.Requests.WithLabelValues(clientName, member.ID, itoa(status)).Inc()
+	metrics.Latency.WithLabelValues(clientName, member.ID).Observe(time.Since(start).Seconds())
+	metrics.CooldownGauge.WithLabelValues(member.ID).Set(0)
+}
+
+// copyStream forwards the body to the client, flushing after every chunk so
+// streamed responses are not held back, and tees a copy to the observer.
+func copyStream(w http.ResponseWriter, body io.Reader, observer io.Writer) {
+	flusher := http.NewResponseController(w)
+	buf := make([]byte, 32*1024)
+	for {
+		n, readErr := body.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			_, _ = observer.Write(chunk)
+			if _, writeErr := w.Write(chunk); writeErr != nil {
+				return // client hung up
+			}
+			_ = flusher.Flush()
+		}
+		if readErr != nil {
+			return
+		}
+	}
+}
+
+func writeHeaders(w http.ResponseWriter, header http.Header) {
+	for k, vals := range header {
+		for _, v := range vals {
+			w.Header().Add(k, v)
+		}
+	}
+}
+
+// bufferedResponse is a response read into memory so it can be inspected for
+// failover before anything is sent to the client.
+type bufferedResponse struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+func bufferResponse(resp *http.Response) *bufferedResponse {
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return &bufferedResponse{status: resp.StatusCode, header: resp.Header, body: body}
+}
+
+// send issues the upstream request and returns the live response with its
+// body still unread, so the caller decides whether to buffer or stream it.
+func (h *Handler) send(orig *http.Request, body []byte, m pool.Member) (*http.Response, error) {
+	ctx := orig.Context()
 	target := strings.TrimRight(m.BaseURL, "/") + orig.URL.Path
 	if orig.URL.RawQuery != "" {
 		target += "?" + orig.URL.RawQuery
@@ -139,7 +207,7 @@ func (h *Handler) forward(ctx context.Context, orig *http.Request, body []byte, 
 	rwBody := RewriteBody(body, m.ModelMap)
 	req, err := http.NewRequestWithContext(ctx, orig.Method, target, bytes.NewReader(rwBody))
 	if err != nil {
-		return 0, nil, nil, err
+		return nil, err
 	}
 	// copy headers
 	for k, vals := range orig.Header {
@@ -170,13 +238,7 @@ func (h *Handler) forward(ctx context.Context, orig *http.Request, body []byte, 
 		req.Header.Set("Content-Length", itoa(len(rwBody)))
 	}
 
-	resp, err := h.client.Do(req)
-	if err != nil {
-		return 0, nil, nil, err
-	}
-	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, resp.Header, b, nil
+	return h.client.Do(req)
 }
 
 func (h *Handler) cooldown(m *pool.Member, ttlSec int) {
@@ -202,21 +264,22 @@ func filterNotTried(members []pool.Member, tried map[string]bool) []pool.Member 
 	return out
 }
 
-func recordTokens(clientName, memberID string, body []byte) {
-	var env struct {
-		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
-	}
-	if err := json.Unmarshal(body, &env); err != nil || env.Usage == nil {
+func recordUsage(clientName, memberID string, u tokenUsage) {
+	if u.empty() {
 		return
 	}
-	if env.Usage.InputTokens > 0 {
-		metrics.Tokens.WithLabelValues(clientName, memberID, "input").Add(float64(env.Usage.InputTokens))
+	add := func(kind string, n int) {
+		if n > 0 {
+			metrics.Tokens.WithLabelValues(clientName, memberID, kind).Add(float64(n))
+		}
 	}
-	if env.Usage.OutputTokens > 0 {
-		metrics.Tokens.WithLabelValues(clientName, memberID, "output").Add(float64(env.Usage.OutputTokens))
+	add("input", u.Input)
+	add("output", u.Output)
+	add("cache_read", u.CacheRead)
+	add("cache_creation", u.CacheCreation)
+	// Thinking tokens are part of the output total, so they are reported on
+	// their own metric rather than as a fourth type that would double-count.
+	if u.Thinking > 0 {
+		metrics.ThinkingTokens.WithLabelValues(clientName, memberID).Add(float64(u.Thinking))
 	}
-	_ = prometheus.NewCounter
 }

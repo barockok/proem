@@ -18,7 +18,7 @@ var (
 
 	Tokens = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proem_tokens_total",
-		Help: "Tokens by client, member and type",
+		Help: "Tokens by client, member and type (input, output, cache_read, cache_creation)",
 	}, []string{"client", "member", "type"})
 
 	Latency = promauto.NewHistogramVec(prometheus.HistogramOpts{
@@ -36,6 +36,11 @@ var (
 		Name: "proem_sticky_hits_total",
 		Help: "Sticky hits",
 	}, []string{"result"})
+
+	ThinkingTokens = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "proem_thinking_tokens_total",
+		Help: "Thinking tokens by client and member (a subset of output tokens)",
+	}, []string{"client", "member"})
 
 	AuthFailures = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proem_auth_failures_total",

@@ -118,7 +118,6 @@ func TestHandlerSuccess(t *testing.T) {
 	st := store.NewWithClient(c)
 	rtr := router.New(st)
 	h := NewHandler(loader, rtr, st, "lb", 2*time.Second)
-	h.client = &http.Client{Timeout: 2 * time.Second}
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{"model":"x"}`))
 	req.Header.Set("x-claude-code-session-id", "sess1")
 	rec := httptest.NewRecorder()
@@ -156,7 +155,6 @@ func TestHandlerFailover(t *testing.T) {
 	st := store.NewWithClient(c)
 	rtr := router.New(st)
 	h := NewHandler(loader, rtr, st, "lb", 2*time.Second)
-	h.client = &http.Client{Timeout: 2 * time.Second}
 	// find session that hashes to a to make test deterministic
 	sess := ""
 	for i := 0; i < 100; i++ {
@@ -201,7 +199,6 @@ func TestHandlerAllFail(t *testing.T) {
 	defer func() { c.Close(); mr.Close() }()
 	st := store.NewWithClient(c)
 	h := NewHandler(loader, rtrNew(st), st, "lb", 2*time.Second)
-	h.client = &http.Client{Timeout: 2 * time.Second}
 	req := httptest.NewRequest("POST", "/v1/messages", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -235,7 +232,6 @@ func TestHandlerStickyRedis(t *testing.T) {
 	defer func() { c.Close(); mr.Close() }()
 	st := store.NewWithClient(c)
 	h := NewHandler(loader, router.New(st), st, "redis", 2*time.Second)
-	h.client = &http.Client{Timeout: 2 * time.Second}
 	req := httptest.NewRequest("POST", "/v1/messages", strings.NewReader(`{}`))
 	req.Header.Set("x-claude-code-session-id", "sessX")
 	rec := httptest.NewRecorder()
@@ -269,7 +265,6 @@ func TestHandlerRetryAfter(t *testing.T) {
 	defer func() { c.Close(); mr.Close() }()
 	st := store.NewWithClient(c)
 	h := NewHandler(loader, router.New(st), st, "lb", 2*time.Second)
-	h.client = &http.Client{Timeout: 2 * time.Second}
 	req := httptest.NewRequest("POST", "/v1/messages", nil)
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -314,12 +309,17 @@ func TestItoa(t *testing.T) {
 func TestNewHandlerDefaultsTimeout(t *testing.T) {
 	loader := &mockLoader{pool: &pool.Pool{}}
 	h := NewHandler(loader, router.New(nil), nil, "lb", 0)
-	if h.client.Timeout != 60*time.Second {
-		t.Fatalf("zero timeout should default to 60s, got %v", h.client.Timeout)
+	// The timeout bounds the response header wait, not the whole body: a
+	// client-wide timeout would truncate long streams.
+	if h.client.Timeout != 0 {
+		t.Fatalf("client must not impose a whole-request timeout, got %v", h.client.Timeout)
+	}
+	if got := h.client.Transport.(*http.Transport).ResponseHeaderTimeout; got != 60*time.Second {
+		t.Fatalf("zero timeout should default to 60s header timeout, got %v", got)
 	}
 	h2 := NewHandler(loader, router.New(nil), nil, "lb", 5*time.Second)
-	if h2.client.Timeout != 5*time.Second {
-		t.Fatalf("explicit timeout not honoured: %v", h2.client.Timeout)
+	if got := h2.client.Transport.(*http.Transport).ResponseHeaderTimeout; got != 5*time.Second {
+		t.Fatalf("explicit timeout not honoured: %v", got)
 	}
 }
 
@@ -366,19 +366,6 @@ func TestForwardPreservesQueryAndMergesBeta(t *testing.T) {
 	if gotBody != `{"model":"vendor/claude-x"}` {
 		t.Fatalf("modelMap not applied: %s", gotBody)
 	}
-}
-
-func TestForwardBadMethodReturnsError(t *testing.T) {
-	os.Setenv("TEST_OAT", "tok")
-	defer os.Unsetenv("TEST_OAT")
-	m := pool.Member{ID: "a", Type: pool.TypeGeneric, Cred: pool.CredRef{Env: "TEST_OAT"}, BaseURL: "https://example.invalid"}
-	h := NewHandler(&mockLoader{pool: &pool.Pool{Members: []pool.Member{m}}}, router.New(nil), nil, "none", time.Second)
-
-	// an invalid method makes http.NewRequestWithContext fail before any dial
-	_, _, _, err := h.forward(context.Background(), httptest.NewRequest("GET", "/v1/messages", nil), nil, pool.Member{
-		ID: "a", Type: pool.TypeGeneric, BaseURL: "https://example.invalid", Cred: pool.CredRef{Env: "TEST_OAT"},
-	})
-	_ = err // dial error path already covered; this call exercises header copy with nil body
 }
 
 func TestCooldownFallbacks(t *testing.T) {

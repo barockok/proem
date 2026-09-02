@@ -14,6 +14,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
+// UnknownForTest is the client label used when a request never passed Auth.
+const UnknownForTest = "unknown"
+
 func jsonLogger(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }

@@ -82,6 +82,14 @@ func New(cfg config.Config) (*App, error) {
 	h := proxy.NewHandler(loader, router.New(st), st, string(cfg.StickyMode), cfg.UpstreamTimeout)
 
 	mux := chi.NewRouter()
+	// Claude Code probes /api/hello for reachability before it sends a request,
+	// and does so without credentials. Answering locally keeps that probe out
+	// of the auth-failure metric without letting unauthenticated traffic reach
+	// an upstream.
+	mux.HandleFunc("/api/hello", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
 	mux.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok"))
