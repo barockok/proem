@@ -8,6 +8,20 @@ import (
 
 var keywords = []string{"rate_limit", "overload", "oauth", "quota", "credit", "rate limit", "insufficient"}
 
+// MayFailover reports whether a response could still trigger failover, judged
+// from its status and headers alone. The proxy calls this before reading any
+// body: a response that cannot fail over is streamed straight through to the
+// client, while a candidate is buffered so ShouldFailover can inspect it.
+//
+// It must stay in agreement with ShouldFailover, which is the authority on the
+// final decision.
+func MayFailover(status int, headers http.Header) bool {
+	if headers.Get("Retry-After") != "" {
+		return true
+	}
+	return status == 429 || status == 401 || status == 529
+}
+
 // ShouldFailover returns (shouldFailover, ttlSec, reason).
 func ShouldFailover(status int, body []byte, headers http.Header) (bool, int, string) {
 	// retry-after header alone triggers failover regardless of body

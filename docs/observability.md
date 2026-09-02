@@ -77,13 +77,25 @@ Accepts CIDR blocks or bare IPs, IPv4 and IPv6. Set this to your load balancer o
 | Metric | Labels |
 | --- | --- |
 | `proem_requests_total` | `client`, `member`, `code` |
-| `proem_tokens_total` | `client`, `member`, `type` |
+| `proem_tokens_total` | `client`, `member`, `type` — `input`, `output`, `cache_read`, `cache_creation` |
+| `proem_thinking_tokens_total` | `client`, `member` |
 | `proem_upstream_latency_seconds` | `client`, `member` |
 | `proem_failovers_total` | `client`, `from_member`, `reason` |
 | `proem_auth_failures_total` | `reason` |
 | `proem_member_cooldown` | `member` |
 | `proem_sticky_hits_total` | `result` |
 | `proem_config_reloads_total` | `result` |
+
+Token counts are read from whichever shape the upstream returns — a JSON body or an event stream — so accounting does not depend on whether a client asked to stream. Cache tokens are counted separately because they are billed differently and, for a cached workload, dominate everything else:
+
+```promql
+# real consumption per agent, cache included
+sum by (client) (increase(proem_tokens_total[24h]))
+```
+
+`proem_thinking_tokens_total` is a **subset** of `output`, reported on its own metric so it is visible without double-counting when you sum `proem_tokens_total`.
+
+`/api/hello` is answered locally, unauthenticated: Claude Code probes it for reachability before sending traffic, and rejecting it would fill `proem_auth_failures_total` with noise.
 
 See [client tokens](client-tokens.md) for per-agent attribution queries.
 

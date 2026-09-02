@@ -330,3 +330,21 @@ func TestJSONLogFormatStarts(t *testing.T) {
 		t.Fatal("handler nil")
 	}
 }
+
+// Claude Code probes this endpoint without credentials before sending traffic.
+// It must not be rejected, or the auth-failure metric fills with noise.
+func TestPreflightHelloNeedsNoAuth(t *testing.T) {
+	a, err := New(testConfig(t, writePool(t, validPool)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer a.Close()
+
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		rec := httptest.NewRecorder()
+		a.Handler().ServeHTTP(rec, httptest.NewRequest(method, "/api/hello", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s /api/hello: got %d, want 200", method, rec.Code)
+		}
+	}
+}
