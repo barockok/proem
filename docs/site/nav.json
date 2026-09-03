@@ -1,0 +1,62 @@
+{
+  "site": {
+    "name": "Proem",
+    "description": "A reverse proxy for Anthropic-compatible APIs. One endpoint, many upstreams, per-client tokens and usage attribution.",
+    "repo": "https://github.com/barockok/proem",
+    "domain": "github.io",
+    "version": "0.3.2",
+    "mark": "P",
+    "favicon": "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%231f6f5c'/><text x='16' y='23' font-family='Helvetica,Arial,sans-serif' font-size='19' font-weight='700' fill='white' text-anchor='middle'>P</text></svg>"
+  },
+  "tabs": [
+    {
+      "id": "start",
+      "label": "Get started",
+      "groups": [
+        {
+          "label": "Introduction",
+          "items": [
+            { "path": "index", "label": "What is Proem?", "layout": "landing" },
+            { "path": "start/quickstart", "label": "Quickstart" },
+            { "path": "start/how-it-works", "label": "How it works" }
+          ]
+        },
+        {
+          "label": "Install",
+          "items": [
+            { "path": "deploy/install", "label": "Install and upgrade" },
+            { "path": "deploy/docker", "label": "Docker" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "guides",
+      "label": "Guides",
+      "groups": [
+        {
+          "label": "Configuration",
+          "items": [
+            { "path": "guides/pool-members", "label": "Pool members" },
+            { "path": "guides/client-tokens", "label": "Client tokens" },
+            { "path": "guides/observability", "label": "Observability" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "reference",
+      "label": "Reference",
+      "groups": [
+        {
+          "label": "Reference",
+          "items": [
+            { "path": "reference/architecture", "label": "Architecture" },
+            { "path": "reference/configuration", "label": "Configuration" },
+            { "path": "reference/metrics", "label": "Metrics" }
+          ]
+        }
+      ]
+    }
+  ]
+}

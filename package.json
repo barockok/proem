@@ -1,0 +1,11 @@
+{
+  "name": "proem-docs",
+  "private": true,
+  "description": "Static site generator for the Proem documentation. Not part of the Go module.",
+  "scripts": {
+    "docs": "node docs/site/build.mjs"
+  },
+  "devDependencies": {
+    "marked": "^16.4.2"
+  }
+}

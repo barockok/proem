@@ -1,0 +1,69 @@
+name: Docs
+
+on:
+  # The site documents the released binary, so it publishes after a release
+  # completes rather than on every push to main.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Do not publish docs for a release that failed.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags, so the site can show the released version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Stamp the released version
+        run: |
+          version=$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//')
+          if [ -n "$version" ]; then
+            node -e '
+              const fs = require("fs");
+              const p = "docs/site/nav.json";
+              const nav = JSON.parse(fs.readFileSync(p, "utf8"));
+              nav.site.version = process.argv[1];
+              fs.writeFileSync(p, JSON.stringify(nav, null, 2) + "\n");
+            ' "$version"
+            echo "site version: $version"
+          fi
+
+      # The generated HTML is not committed. This job is its only author, so
+      # what is published is always a build of the Markdown at this commit.
+      - name: Build the docs site
+        run: node docs/site/build.mjs
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/site/_site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

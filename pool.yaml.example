@@ -1,34 +1,33 @@
-# proem pool example
-# Secrets via env or file; never plain token here.
+# Proem pool: the upstreams this proxy may route to.
+#
+# Credentials are never written here. Each member references an environment
+# variable or a file, which Proem reads at request time.
 members:
-  - id: anthropic-a
-    type: anthropic_oauth
+  - id: anthropic
+    type: anthropic_api          # x-api-key
     cred:
-      env: CLAUDE_OAT_A
-      # file: /run/secrets/oat_a
+      env: ANTHROPIC_API_KEY
+      # file: /run/secrets/anthropic
     baseURL: https://api.anthropic.com
-    modelMap: {}
-    weight: 1
-    enabled: true
-    cooldownSec: 18000  # 5h
+    weight: 3
 
-  - id: anthropic-b
-    type: anthropic_oauth
-    cred:
-      env: CLAUDE_OAT_B
-    baseURL: https://api.anthropic.com
-    modelMap: {}
-    weight: 1
-    enabled: true
-
-  - id: openrouter-1
-    type: openrouter
+  - id: openrouter
+    type: openrouter             # Authorization: Bearer
     cred:
       env: OPENROUTER_KEY
     baseURL: https://openrouter.ai/api/v1
+    weight: 1
+    # Rewrites the model field for this member only, so clients can keep
+    # asking for one name regardless of which member serves the request.
     modelMap:
       claude-sonnet-4-20250514: anthropic/claude-sonnet-4
       claude-haiku-4-5-20251001: anthropic/claude-haiku-4.5
-    weight: 1
-    enabled: true
-    cooldownSec: 60
+
+  # A self-hosted or third-party Anthropic-compatible gateway.
+  # - id: internal
+  #   type: generic
+  #   cred:
+  #     file: /run/secrets/internal
+  #   baseURL: https://gateway.internal
+  #   cooldownSec: 60            # how long to skip it after a rate limit
+  #   enabled: false             # keep the entry, exclude it from routing

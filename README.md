@@ -2,67 +2,66 @@
 
 > **proem** *(n.)* — from Latin *prooemium*, an introductory discourse; a preamble.
 >
-> Every request gets a preface before the main text: the proxy authenticates the caller, chooses which credential speaks for them, and hands the conversation to the upstream. The agent writes the book; Proem writes the front matter.
+> Every request gets a preface before the main text: the proxy authenticates the caller, chooses which credential speaks for them, and hands the conversation to the upstream.
 
-Stateless Go reverse proxy that pools Anthropic Pro/Max OAuth tokens (`sk-ant-oat01-…`) alongside heterogeneous upstreams (Anthropic API, OpenRouter, DeepSeek). When a member hits its 5h limit the proxy fails over to the next healthy one and puts the exhausted member on a Redis cooldown. Token usage, failovers and latency are exported to Prometheus.
+**A reverse proxy for Anthropic-compatible APIs.** Point your clients at Proem instead of an upstream provider, and it authenticates the caller, routes to a healthy member of a configured pool, injects that member's credential, and records what the request consumed — attributed to the caller that made it.
 
-Each agent gets its own proxy-issued token, so usage is attributable per agent and no caller ever holds a real Anthropic credential:
+Anything speaking the Anthropic Messages API works unchanged — the Anthropic SDKs, the Claude Agent SDK, Claude Code, or your own HTTP client. It is a base-URL change:
 
 ```bash
-export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-...   # issued by the proxy
 export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_AUTH_TOKEN=sk-ant-oat01-...   # issued by Proem, valid only here
 ```
 
-## Documentation
+📖 **[Documentation](docs/site/_content/index.md)** — also published at [barockok.github.io/proem](https://barockok.github.io/proem/)
 
-| Guide | What it covers |
-| --- | --- |
-| [Getting started](docs/getting-started.md) | Install, configure `pool.yaml`, run locally or via Docker, first request |
-| [Architecture](docs/architecture.md) | Components, request path, HA model, latency budget |
-| [How it works](docs/how-it-works.md) | Auth variants, failover and cooldown rules, model mapping, metrics |
-| [Adding a pool member](docs/adding-pool-member.md) | Add, weight, disable or remove an upstream — with hot reload |
-| [Client tokens](docs/client-tokens.md) | Issue tokens to agents, revoke them, attribute usage per agent |
-| [Observability](docs/observability.md) | Access log, auth-failure alerts, client IP behind proxies, metrics |
-| [Design spec](docs/2026-08-31-claude-proxy-subs-design.md) | Original design document |
+## Why
+
+- **One endpoint over several providers.** Mix the Anthropic API with any Anthropic-compatible gateway — OpenRouter, DeepSeek, something self-hosted. Per-member model mapping lets a client keep asking for one model name.
+- **Credentials stay put.** Provider keys live in Proem's config, read from env vars or files. Callers hold their own issued tokens, revocable individually.
+- **Usage you can attribute.** `sum by (client) (increase(proem_tokens_total[24h]))` answers who consumed what — including cache reads and writes, which dominate cached workloads.
+- **Failover without breaking streaming.** A rate-limited member is cooled and the next one tried. Responses that cannot fail over stream straight through, unbuffered.
+
+Proem does not change the terms you have with any provider. It routes requests to endpoints you name, using credentials you supply.
 
 ## Quick start
 
 ```bash
-cp pool.yaml.example pool.yaml         # then edit members
-export CLAUDE_OAT_A=sk-ant-oat01-...   # secrets come from env or files
-docker run -d -p 6379:6379 redis:7-alpine
-
-# issue a token per agent; paste the printed entry into clients.yaml
-go run ./cmd/proem issue-token agent-maria > /dev/null && \
-  go run ./cmd/proem issue-token agent-maria
-
-go run ./cmd/proem --config ./pool.yaml --clients ./clients.yaml \
-  --redis-url redis://localhost:6379/0
+make install
+cp pool.yaml.example pool.yaml       # then edit members
+proem issue-token agent-maria        # paste the printed entry into clients.yaml
+proem --config ./pool.yaml --clients ./clients.yaml \
+      --redis-url redis://localhost:6379/0
 ```
 
-Health check on `:8080/health`, Prometheus metrics on `:9090/metrics`. Full walkthrough in [getting started](docs/getting-started.md).
+Health on `:8080/health`, metrics on `:9090/metrics`. Full walkthrough in the [quickstart](docs/site/_content/start/quickstart.md).
 
-## Features
+## Documentation
 
-- **Per-agent tokens** — each caller gets an issued token; the proxy authenticates it, stores only its hash, and swaps it for a pooled credential upstream.
-- **Usage attribution** — `proem_tokens_total{client="agent-maria"}` shows exactly what each agent consumed.
-- **Failover on rate limits** — body-checked `429/401/529` plus `Retry-After`, with per-member cooldown in Redis (5h default for Anthropic).
-- **Heterogeneous pool** — mix OAuth, API-key and third-party members; `modelMap` rewrites model names per upstream.
-- **Hot reload** — `pool.yaml` is watched and swapped atomically; invalid edits keep the previous pool.
-- **Optional stickiness** — `lb` (hash on session id, no Redis), `redis` (pinned sessions), or `none`.
-- **Fail-open** — if Redis is unavailable the proxy keeps serving with cooldown and stickiness disabled.
-- **Observability** — structured access log and per-reason auth-failure metrics; requests, failovers, tokens, latency, cooldown state and config reloads as Prometheus series. Bodies, query strings and tokens are never logged.
+| | |
+| --- | --- |
+| [Quickstart](docs/site/_content/start/quickstart.md) | Running in about five minutes |
+| [How it works](docs/site/_content/start/how-it-works.md) | The request path, end to end |
+| [Pool members](docs/site/_content/guides/pool-members.md) | Adding, weighting and mapping upstreams |
+| [Client tokens](docs/site/_content/guides/client-tokens.md) | Issuing, revoking, attributing |
+| [Observability](docs/site/_content/guides/observability.md) | Access log, auth alerts, client IP |
+| [Architecture](docs/site/_content/reference/architecture.md) | Components and state |
+| [Configuration](docs/site/_content/reference/configuration.md) | Every flag |
+| [Metrics](docs/site/_content/reference/metrics.md) | Every series |
+| [Install and upgrade](docs/site/_content/deploy/install.md) | Building, installing, upgrading safely |
+| [Docker](docs/site/_content/deploy/docker.md) | Running from the published image |
+
+These pages are the source of the [published site](https://barockok.github.io/proem/); they render on GitHub too, so the links above work without leaving the repo.
 
 ## Development
 
 ```bash
-proem version  # print the build's version
-make test      # go test ./... -race with coverage profile
-make vet       # go vet ./...
-make build     # binary into bin/proem
-./scripts/coverage.sh   # tests + enforce the internal coverage minimum
+make test      # go test ./... -race, plus the install-script test
+make vet
+make build
+make install   # atomic-rename install, safe while the proxy is running
+./scripts/coverage.sh    # enforce the internal coverage minimum
+npm ci && node docs/site/build.mjs   # build the docs site locally
 ```
 
-CI runs gofmt, vet, the race-enabled coverage gate, a binary smoke test against a live Redis service, and a Docker build. Tagging `v*` publishes binaries and a `ghcr.io` image.
-
-**Auth grounding:** the OAuth header shape (`Authorization: Bearer <oat>` plus `anthropic-beta: oauth-2025-04-20`) is confirmed by a live capture in `probe/capture.log` (claude-cli/2.1.251), not inferred.
+CI runs gofmt, vet, a race-enabled coverage gate (95% minimum over `internal/`), a binary smoke test against a live Redis, and a Docker build. Tagging `v*` publishes signed binaries and a `ghcr.io` image, then republishes the docs site.
