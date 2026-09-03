@@ -1,23 +1,23 @@
-# proem client registry.
+# Proem client registry: the callers allowed to use this proxy.
 #
-# Each entry is one caller of the proxy. Mint a token with:
+# Mint a token for each caller, which prints the entry to paste here:
 #
 #   proem issue-token agent-maria
 #
-# It prints the token once (give it to the agent as CLAUDE_CODE_OAUTH_TOKEN)
-# and the digest to paste here. Only the digest is stored, so this file is not
-# itself a secret and unknown tokens are rejected with 401.
+# Only the SHA-256 digest is stored, so this file is not itself a secret and a
+# leaked copy cannot be used to call the proxy.
 #
-# The `name` becomes the `client` label on usage metrics, e.g.
-#   proem_tokens_total{client="agent-maria",member="anthropic-a",type="output"}
+# The digests below are placeholders with no corresponding token. Copied as-is
+# the proxy starts and refuses every request, which is the safe failure: replace
+# each one with the output of issue-token.
 clients:
   - name: agent-maria
-    tokenSHA256: 6bc4a596d198c83d80bd44a4e46e3f4007e12a35a086a8452abf9f79b0ec1f66
+    tokenSHA256: 0000000000000000000000000000000000000000000000000000000000000001
 
   - name: agent-sora
-    tokenSHA256: 2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae
+    tokenSHA256: 0000000000000000000000000000000000000000000000000000000000000002
 
-  # Revoke access without deleting the entry:
+  # Revoke access without deleting the record:
   # - name: agent-retired
-  #   tokenSHA256: ...
+  #   tokenSHA256: 0000000000000000000000000000000000000000000000000000000000000003
   #   enabled: false

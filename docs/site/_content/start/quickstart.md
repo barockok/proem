@@ -40,12 +40,12 @@ proem issue-token agent-maria
 ```
 Token for agent-maria (shown once, store it now):
 
-  sk-ant-oat01-y5PRGD7JmUVBqYJ1W_a-2HKRTeuFGkVGXjtTur5pXLc
+  sk-ant-oat01-EXAMPLE00000000000000000000000000000000000000
 
 Add to clients.yaml:
 
   - name: agent-maria
-    tokenSHA256: 6bc4a596d198c83d80bd44a4e46e3f4007e12a35a086a8452abf9f79b0ec1f66
+    tokenSHA256: 0000000000000000000000000000000000000000000000000000000000000001
 ```
 
 Paste that entry into `clients.yaml`. Only the digest is stored, so the file is
