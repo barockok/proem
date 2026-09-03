@@ -34,6 +34,31 @@ export ANTHROPIC_BASE_URL=http://localhost:8080
 
 The proxy is fail-closed: it will not start without `--clients`, and requests without a recognised token get a 401. See [client tokens](client-tokens.md).
 
+### Installing and upgrading
+
+```bash
+make install                 # builds, then installs to ~/.local/bin/proem
+make install PREFIX=/usr/local
+```
+
+Upgrade an existing install the same way, including while the proxy is running.
+The install replaces the binary by `rename(2)` rather than writing over it.
+
+That distinction matters. Copying over a binary that is currently executing
+reuses its inode, and macOS then holds a code signature that no longer matches
+the image it mapped: the path stops being executable and exits `137`, and a
+running service is killed with `OS_REASON_CODESIGNING`. A rename swaps the
+directory entry instead, so the running process keeps its old inode and the
+next start picks up the new file.
+
+If you install a downloaded release binary by hand, do the same:
+
+```bash
+./scripts/install-binary.sh ./proem-darwin-arm64 ~/.local/bin/proem
+```
+
+Avoid `cp proem ~/.local/bin/proem` while the proxy is running.
+
 ### macOS
 
 The released darwin binaries are ad-hoc signed, so they run on Apple Silicon as

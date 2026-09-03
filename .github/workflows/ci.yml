@@ -75,6 +75,9 @@ jobs:
           curl -fsS http://localhost:19090/metrics | grep -q 'client="agent-ci"' \
             || { echo "metrics missing the client label"; exit 1; }
 
+      - name: Install script replaces by rename
+        run: ./scripts/tests/install-binary_test.sh
+
       - name: Smoke test issue-token
         run: /tmp/proem issue-token agent-ci | grep -q "sk-ant-oat01-"
 
