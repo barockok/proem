@@ -1,9 +1,9 @@
 ---
 title: Docker
-description: Running Proem from the published container image.
+description: How to run Proem from the published container image.
 ---
 
-Images are published to the GitHub Container Registry on every release:
+CI publishes an image to the GitHub Container Registry for each release.
 
 ```bash
 docker pull ghcr.io/barockok/proem:0.3.2   # also :0.3 and :latest
@@ -20,8 +20,8 @@ docker run -d --name proem \
   --redis-url redis://redis:6379/0
 ```
 
-The image is distroless and runs as a non-root user, so credential files
-mounted into it must be readable by that user.
+The image is distroless and runs as a user that is not root. A credential file
+that you mount into the container must be readable by that user.
 
 ## Compose
 
@@ -47,7 +47,7 @@ services:
 
 ## Credentials
 
-Prefer a mounted file over an environment variable where your orchestrator
+Use a mounted file instead of an environment variable when your orchestrator
 supports secrets:
 
 ```yaml
@@ -59,10 +59,12 @@ members:
     baseURL: https://api.anthropic.com
 ```
 
-## Hot reload in a container
+## Reload inside a container
 
-The config watcher follows the path it was given. A bind-mounted file that is
-edited in place reloads normally. Some orchestrators replace configuration by
-swapping a symlink instead, which is also handled — a rejected edit leaves the
-previous configuration in force and is reported on
+Proem watches the path that you give it. It reloads a mounted file that you
+edit in place.
+
+Some orchestrators replace a configuration file by moving a symbolic link.
+Proem handles that too. If a change fails validation, Proem keeps the
+configuration that is already running and increases
 `proem_config_reloads_total{result="error"}`.

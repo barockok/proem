@@ -1,23 +1,22 @@
 ---
 title: How it works
-description: The path a request takes through Proem — authentication, member selection, credential injection, failover and accounting.
+description: The path of a request through Proem. Authentication, member selection, credential injection, failover and accounting.
 ---
 
-## Two layers of credentials
+## Two credentials
 
-Proem sits between two independent credentials, and keeping them apart is the
-point of the design.
+Proem holds two credentials that must stay separate.
 
-| | Held by | Checked against |
+| Credential | Held by | Checked against |
 |---|---|---|
-| **Client token** | the calling agent | `clients.yaml` digests |
-| **Provider credential** | Proem | the upstream provider |
+| Client token | the client | the digests in `clients.yaml` |
+| Member credential | Proem | the member |
 
-The client token is authenticated and then **removed** from the request; the
-provider credential is injected in its place. A leaked client token grants
-nothing beyond this proxy, and revoking one is a single line of config.
+Proem authenticates the client token and then removes it from the request. It
+adds the member credential in place of it. A stolen client token gives access
+to Proem only. To revoke that access, you change one line of configuration.
 
-## The request path
+## The path of a request
 
 ```mermaid
 sequenceDiagram
@@ -25,79 +24,96 @@ sequenceDiagram
   participant C as Client
   participant A as Auth
   participant R as Router
-  participant U as Upstream
+  participant U as Member
   participant M as Metrics
 
-  C->>A: POST /v1/messages + issued token
-  alt token unknown or disabled
-    A-->>C: 401 / 403 (Anthropic error shape)
+  C->>A: POST /v1/messages with issued token
+  alt token unknown or client disabled
+    A-->>C: 401 or 403 in the Anthropic error shape
     A->>M: proem_auth_failures_total
-  else authenticated
-    A->>R: request + resolved client name
-    R->>R: drop disabled and cooled members
-    R->>U: forward with provider credential
-    alt rate limited or overloaded
-      U-->>R: 429 / 401 / 529
-      R->>R: cooldown member, try next
-      R->>U: retry on another member
+  else client authenticated
+    A->>R: request and client name
+    R->>R: remove disabled and cooled members
+    R->>U: forward with the member credential
+    alt member reports a rate limit
+      U-->>R: 429, 401 or 529
+      R->>R: put the member in cooldown
+      R->>U: retry on the next member
     end
-    U-->>C: response streamed through
-    R->>M: tokens, latency, status by client
+    U-->>C: response streamed to the client
+    R->>M: tokens, latency and status by client
   end
 ```
 
-## Selecting a member
+## How Proem selects a member
 
-The router drops members that are disabled or in cooldown, then picks from
-what remains. With a session identifier present it hashes it, so the same
-session keeps landing on the same member; otherwise it picks at random.
-Selection is weighted, so a member with `weight: 4` receives roughly four times
-the traffic of a `weight: 1` peer.
+The router first removes members that are disabled or in cooldown. It then
+selects one of the members that remain.
 
-Stickiness has three modes. `lb` hashes the session id and needs no shared
-state. `redis` pins a session to a member in Redis. `none` disables it.
+If the request carries a session identifier, the router hashes it. The same
+session then reaches the same member each time. If there is no session
+identifier, the router selects at random.
 
-## Failover, and why streaming still works
+Both methods respect weight. A member with `weight: 4` receives about four
+times the requests of a member with `weight: 1`.
 
-Failover has to inspect a response before deciding to retry, but bytes already
-sent to a client cannot be recalled. Proem therefore decides from the status
-and headers **before** committing anything:
+Session affinity has three modes:
+
+- `lb` hashes the session identifier. It needs no shared state.
+- `redis` stores the pinned member in Redis.
+- `none` disables affinity.
+
+## Failover and streaming
+
+Failover must read a response before it decides to retry. Proem cannot recall
+bytes that it already sent to the client. Proem therefore decides from the
+status and the headers, before it sends anything.
 
 ```mermaid
 flowchart TB
-  Resp["Upstream response"] --> Cand{"Could this<br/>fail over?<br/>429 / 401 / 529<br/>or Retry-After"}
-  Cand -->|no| Stream["Stream through<br/>flushed chunk by chunk"]
-  Cand -->|yes| Buf["Buffer the body<br/>(small error envelope)"]
-  Buf --> Check{"Body confirms<br/>rate limit?"}
-  Check -->|yes| Cool["Cool the member<br/>try the next one"]
-  Check -->|no| Send["Send it to the client"]
-  Stream --> Usage["Usage observed<br/>in passing"]
+  Resp["Response from member"] --> Cand{"Can this response<br/>fail over?<br/>429, 401, 529<br/>or Retry-After"}
+  Cand -->|no| Stream["Send to the client<br/>flush each chunk"]
+  Cand -->|yes| Buf["Read the body<br/>it is a small error"]
+  Buf --> Check{"Does the body confirm<br/>a rate limit?"}
+  Check -->|yes| Cool["Put the member in cooldown<br/>try the next member"]
+  Check -->|no| Send["Send to the client"]
+  Stream --> Usage["Read usage<br/>while copying"]
   Send --> Usage
 ```
 
-A response that cannot fail over is copied straight through and flushed as it
-arrives, so a streaming client sees tokens as they are produced. Once streaming
-has begun the response is committed: an error arriving mid-stream is passed to
-the client rather than retried, because the client has already seen part of the
-answer.
+Proem copies a response that cannot fail over straight to the client. It
+flushes each chunk as it arrives, so a streaming client receives tokens as the
+member produces them.
+
+After a stream starts, Proem cannot fail over. It sends an error that arrives
+in the middle of a stream to the client, because the client already has part of
+the answer.
 
 ## Cooldown
 
-When a member is rate limited it is written to Redis with a TTL, and the router
-skips it until that expires. The TTL comes from the response's `Retry-After`
-when present, otherwise the member's `cooldownSec`, otherwise a default.
+When a member reports a rate limit, Proem writes a key to Redis with a time to
+live. The router skips that member until the key expires.
 
-If Redis is unavailable Proem fails open: every member is considered healthy
-and stickiness is skipped, so a Redis outage degrades routing quality rather
-than stopping traffic.
+Proem selects the time to live in this order:
+
+1. The `Retry-After` header of the response, if the member sent one.
+2. The `cooldownSec` field of the member.
+3. A built-in default.
+
+If Redis is not available, Proem fails open. It treats every member as healthy
+and skips session affinity. A Redis outage lowers the quality of routing. It
+does not stop traffic.
 
 ## Accounting
 
-A usage observer reads the response as it is copied, without altering or
-delaying it. It understands both shapes — a single JSON body, and an event
-stream — so accounting does not depend on whether the client asked to stream.
+A usage observer reads the response while Proem copies it. The observer does
+not change the bytes and does not delay them.
 
-Providers disagree about which stream event carries which counter, so every
-counter is merged from whichever event reports it, keeping the highest value
-seen. Input, output, cache reads and cache writes are all recorded, labelled by
-client and member.
+The observer reads both response shapes: a single JSON body, and an event
+stream. Accounting therefore does not depend on whether the client asked to
+stream.
+
+Members disagree about which stream event carries which counter. The observer
+therefore merges each counter from whichever event reports it, and keeps the
+highest value it sees. It records input tokens, output tokens, cache reads and
+cache writes, labelled by client and by member.

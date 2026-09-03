@@ -1,41 +1,57 @@
 ---
 title: Quickstart
-description: Run Proem in front of one upstream, issue a client token, and make an authenticated request.
+description: Run Proem in front of one member, issue a client token, and send an authenticated request.
 ---
 
-## 1. Install
+## 1. Install Proem
 
 ```bash
-git clone https://github.com/barockok/proem.git && cd proem
-make install            # builds and installs to ~/.local/bin/proem
+git clone https://github.com/barockok/proem.git
+cd proem
+make install
 ```
 
-Or take a binary from the [releases page](https://github.com/barockok/proem/releases)
-and install it with `./scripts/install-binary.sh <binary> ~/.local/bin/proem`.
-See [install and upgrade](../deploy/install.md) for why that script exists.
+`make install` builds the binary and installs it to `~/.local/bin/proem`.
 
-## 2. Describe the pool
+You can also download a binary from the
+[releases page](https://github.com/barockok/proem/releases). Install it with
+this command:
 
-`pool.yaml` lists the upstreams Proem may route to. One is enough to start:
+```bash
+./scripts/install-binary.sh ./proem-darwin-arm64 ~/.local/bin/proem
+```
+
+[Install and upgrade](../deploy/install.md) explains why you must use that
+script and not `cp`.
+
+## 2. Write the pool file
+
+`pool.yaml` lists the members that Proem can route to. One member is enough to
+start.
 
 ```yaml
 members:
   - id: anthropic
     type: anthropic_api
     cred:
-      env: ANTHROPIC_API_KEY     # or: file: /run/secrets/anthropic
+      env: ANTHROPIC_API_KEY
     baseURL: https://api.anthropic.com
 ```
 
-`type` selects how the credential is presented: `anthropic_api` sends
-`x-api-key`, `anthropic_oauth` sends a bearer token with the OAuth beta header,
-and `openrouter`, `deepseek` and `generic` send a plain bearer token.
+The `type` field selects how Proem sends the credential:
 
-## 3. Issue a token for each caller
+- `anthropic_api` sends the `x-api-key` header.
+- `anthropic_oauth` sends a bearer token and the OAuth beta header.
+- `openrouter`, `deepseek` and `generic` send a bearer token.
+
+## 3. Issue a token for each client
 
 ```bash
 proem issue-token agent-maria
 ```
+
+The command prints the token one time. It also prints the entry to add to
+`clients.yaml`:
 
 ```
 Token for agent-maria (shown once, store it now):
@@ -48,30 +64,40 @@ Add to clients.yaml:
     tokenSHA256: 0000000000000000000000000000000000000000000000000000000000000001
 ```
 
-Paste that entry into `clients.yaml`. Only the digest is stored, so the file is
-not itself a secret. Proem will not start without a client registry, and any
-request without a recognised token is rejected.
+Add that entry to `clients.yaml`. Proem stores only the digest, so the file is
+not a secret. Proem does not start without a client registry, and it refuses
+every request that does not carry a known token.
 
-## 4. Run it
+## 4. Run Proem
+
+Start Redis first. Redis holds cooldown state. It is optional, but Proem routes
+better with it.
 
 ```bash
-docker run -d -p 6379:6379 redis:7-alpine    # cooldown state; optional but recommended
+docker run -d -p 6379:6379 redis:7-alpine
+```
 
+Then start Proem:
+
+```bash
 export ANTHROPIC_API_KEY=sk-ant-api03-...
 proem --config ./pool.yaml --clients ./clients.yaml \
       --redis-url redis://localhost:6379/0
 ```
 
-Health on `:8080/health`, metrics on `:9090/metrics`.
+Proem serves the proxy on port 8080 and metrics on port 9090.
 
-## 5. Point a client at it
+## 5. Send a request
+
+Set two variables in the client:
 
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:8080
-export ANTHROPIC_AUTH_TOKEN=sk-ant-oat01-...   # the token from step 3
+export ANTHROPIC_AUTH_TOKEN=sk-ant-oat01-...
 ```
 
-Then use any Anthropic-compatible client:
+Use the token from step 3. Then call the API with any Anthropic-compatible
+client:
 
 ```bash
 curl -s $ANTHROPIC_BASE_URL/v1/messages \
@@ -81,7 +107,7 @@ curl -s $ANTHROPIC_BASE_URL/v1/messages \
        "messages":[{"role":"user","content":"say hello"}]}'
 ```
 
-Usage shows up immediately, attributed to the caller:
+Proem records the usage immediately:
 
 ```bash
 curl -s localhost:9090/metrics | grep proem_tokens_total
@@ -92,14 +118,19 @@ proem_tokens_total{client="agent-maria",member="anthropic",type="input"} 12
 proem_tokens_total{client="agent-maria",member="anthropic",type="output"} 48
 ```
 
-## Notes on client credentials
+## Which variable carries the token
 
-Proem accepts the caller's token from either `Authorization: Bearer` or
-`x-api-key`, so it does not matter which environment variable your client uses
-to carry it.
+Proem reads the client token from the `Authorization` header or from the
+`x-api-key` header. Both work, so the variable name in your client does not
+matter to Proem.
 
-One caveat worth knowing: `CLAUDE_CODE_OAUTH_TOKEN` makes Claude Code assume it
-is talking to Anthropic directly and request a one-hour prompt cache. Upstreams
-that do not implement that reject the request with
-``400 `cache_control.ttl: 1h` is not supported``. Passing the same token as
-`ANTHROPIC_AUTH_TOKEN` avoids it.
+The variable name can matter to the client. `CLAUDE_CODE_OAUTH_TOKEN` makes
+Claude Code assume that it calls Anthropic directly. Claude Code then asks for
+a one-hour prompt cache. A member that does not support that cache rejects the
+request:
+
+```
+400 `cache_control.ttl: 1h` is not supported
+```
+
+To avoid this, pass the same token as `ANTHROPIC_AUTH_TOKEN`.

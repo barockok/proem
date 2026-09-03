@@ -1,30 +1,31 @@
 ---
 title: Observability
-description: The access log, auth-failure alerting, client IP behind proxies, and what is deliberately never logged.
+description: The access log, alerts on authentication failures, client IP behind a proxy, and what Proem never logs.
 ---
 
-## What is never logged
+## What Proem never logs
 
-Bodies are never recorded, in either direction. Requests carry prompts and
-responses carry completions, and both may contain anything the caller put in
-them.
+Proem does not log request bodies or response bodies. A request body carries a
+prompt. A response body carries a completion. Both can contain anything that
+the client sent.
 
-| Never logged | Why |
+| Proem never logs | Reason |
 |---|---|
-| Request body | prompts, user data |
-| Response body | completions |
-| URL query string | callers can put anything there; only the path is logged |
-| Client tokens | a rejected token is logged as a 12-character fingerprint |
-| Provider credentials | never touched by logging at all |
+| The request body | It contains prompts and user data. |
+| The response body | It contains completions. |
+| The URL query string | A client can put anything in it. Proem logs the path only. |
+| Client tokens | Proem logs a 12-character fingerprint of a rejected token. |
+| Member credentials | Logging never reads them. |
 
-A rejected token appears as `token_fp`, the first 12 hex characters of its
-SHA-256 digest — enough to distinguish "the same wrong token 500 times" from
-"500 different wrong tokens" without recording the credential.
+Proem logs a rejected token as `token_fp`. This is the first 12 hex characters
+of the SHA-256 digest of the token. The fingerprint separates one wrong token
+that arrives 500 times from 500 different wrong tokens. It does not record the
+token.
 
 ## Access log
 
-One line per request, after it completes. `/health` is skipped so probe traffic
-does not drown the log.
+Proem writes one line for each request, after the request completes. Proem does
+not log `/health`, so probe traffic stays out of the log.
 
 ```json
 {"time":"2026-09-03T08:27:08Z","level":"INFO","msg":"request","method":"POST",
@@ -32,12 +33,12 @@ does not drown the log.
  "client":"agent-maria","ip":"203.0.113.77","user_agent":"claude-cli/2.1.258"}
 ```
 
-`--access-log=false` turns it off; `--log-format json` (default `text`) selects
-the encoding.
+Use `--access-log=false` to stop the access log. Use `--log-format json` to
+select JSON. The default format is `text`.
 
-## Auth failures
+## Authentication failures
 
-Every rejection is counted and logged at `WARN`:
+Proem counts and logs every rejection at level `WARN`.
 
 ```promql
 sum by (reason) (rate(proem_auth_failures_total[5m]))
@@ -45,17 +46,18 @@ sum by (reason) (rate(proem_auth_failures_total[5m]))
 
 | `reason` | Meaning |
 |---|---|
-| `missing_credentials` | no `Authorization` or `x-api-key` header |
-| `unknown_token` | token not in the registry (includes `token_fp`) |
-| `client_disabled` | known client with `enabled: false` (includes `client`) |
+| `missing_credentials` | The request had no `Authorization` header and no `x-api-key` header. |
+| `unknown_token` | The token is not in the registry. The log line includes `token_fp`. |
+| `client_disabled` | The client is known and `enabled` is false. The log line includes `client`. |
 
-A sustained `unknown_token` rate means someone is guessing. A spike in
-`missing_credentials` usually means a caller was deployed without its token.
+A steady rate of `unknown_token` means that someone tries to guess a token. A
+sudden rate of `missing_credentials` usually means that a client started
+without its token.
 
 ## Client IP behind a proxy
 
-`X-Forwarded-For` is caller-supplied and trivially forged, so Proem ignores it
-unless the immediate peer is a proxy you have named:
+A client sends the `X-Forwarded-For` header, and a client can therefore forge
+it. Proem reads that header only when the peer is a proxy that you name:
 
 ```bash
 proem --trusted-proxies '10.0.0.0/8,192.168.1.1'
@@ -64,21 +66,23 @@ proem --trusted-proxies '10.0.0.0/8,192.168.1.1'
 ```mermaid
 flowchart LR
   C["client<br/>203.0.113.9"] --> E["edge proxy<br/>10.9.9.9"] --> P["Proem"]
-  P --> D{"peer in<br/>--trusted-proxies?"}
-  D -->|no| U["use the peer address<br/>header discarded"]
-  D -->|yes| W["walk X-Forwarded-For<br/>right to left"] --> R["first address that is<br/>not one of ours<br/>203.0.113.9"]
+  P --> D{"Is the peer in<br/>--trusted-proxies?"}
+  D -->|no| U["Use the peer address.<br/>Discard the header."]
+  D -->|yes| W["Read X-Forwarded-For<br/>from right to left"] --> R["Use the first address<br/>that is not one of yours:<br/>203.0.113.9"]
 ```
 
-Walking from the right means a caller that prepends a fake hop cannot win: the
-walk starts at the end your own proxy appended. With no `--trusted-proxies`
-the header is ignored entirely and the peer address is used, which is correct
-when clients reach Proem directly.
+Proem reads the header from right to left. The rightmost entries are the ones
+that your own proxies added, so a client cannot win by adding an entry at the
+start.
 
-Set this to your load balancer range. Leaving it empty behind a proxy logs the
-balancer's address for every request; setting it too broadly lets callers forge
-their own.
+If you do not set `--trusted-proxies`, Proem ignores the header and uses the
+peer address. This is correct when clients reach Proem directly.
+
+Set this option to the address range of your load balancer. If you leave it
+empty behind a proxy, Proem logs the address of the load balancer for every
+request. If you set it too wide, a client can forge its own address.
 
 ## Metrics
 
-Scrape `:9090/metrics`. See [metrics](../reference/metrics.md) for the full list
-and the cardinality it implies.
+Read metrics from port 9090 at `/metrics`. [Metrics](../reference/metrics.md)
+lists every series and the number of series that the labels create.
