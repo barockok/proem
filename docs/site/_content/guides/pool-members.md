@@ -1,11 +1,11 @@
 ---
 title: Pool members
-description: Adding, weighting, disabling and removing the upstreams Proem routes to.
+description: How to add, weight, disable and remove the members that Proem routes to.
 ---
 
-A pool member is one upstream Proem may route to. The file is validated on
-load and on every change; an edit that fails validation is reported and the
-previous pool stays in force.
+A member is one endpoint that Proem can route to. Proem validates the pool file
+when it loads it and again after every change. If a change fails validation,
+Proem reports the error and keeps the pool that is already running.
 
 ```yaml
 members:
@@ -31,49 +31,51 @@ members:
     enabled: false
 ```
 
+## Fields
+
 | Field | Meaning |
 |---|---|
-| `id` | Unique, and the `member` label on metrics |
-| `type` | How the credential is presented — see below |
-| `cred` | `env:` or `file:`; the value itself is never in this file |
-| `baseURL` | Must be `https://` |
-| `weight` | Share of traffic, default `1`. `0` is allowed and means never chosen |
-| `enabled` | Default true. `false` keeps the entry but excludes it from routing |
-| `cooldownSec` | How long to skip this member after a rate limit |
-| `modelMap` | Rewrites the `model` field on the way out |
+| `id` | The name of the member. It must be unique. It becomes the `member` label on metrics. |
+| `type` | How Proem sends the credential. See the table below. |
+| `cred` | Where Proem reads the credential. Use `env:` or `file:`. The credential itself is never in this file. |
+| `baseURL` | The address of the member. It must use `https://`. |
+| `weight` | The share of requests this member receives. The default is `1`. A weight of `0` means Proem never selects it. |
+| `enabled` | The default is true. Set it to `false` to keep the entry and stop routing to it. |
+| `cooldownSec` | How long Proem skips this member after a rate limit. |
+| `modelMap` | Model names to rewrite for this member. |
 
 ## Credential types
 
-| `type` | Header sent |
+| `type` | Header that Proem sends |
 |---|---|
-| `anthropic_api` | `x-api-key: <cred>` |
-| `anthropic_oauth` | `Authorization: Bearer <cred>` plus the OAuth beta header |
-| `openrouter`, `deepseek`, `generic` | `Authorization: Bearer <cred>` |
+| `anthropic_api` | `x-api-key: <credential>` |
+| `anthropic_oauth` | `Authorization: Bearer <credential>` and the OAuth beta header |
+| `openrouter`, `deepseek`, `generic` | `Authorization: Bearer <credential>` |
 
-Pick the one that matches what the upstream expects. `generic` is the right
-choice for a self-hosted or third-party Anthropic-compatible gateway that
-authenticates with a plain bearer token.
+Select the type that the member expects. Use `generic` for a gateway that you
+host, or for a third-party Anthropic-compatible gateway that reads a bearer
+token.
 
 ## Model mapping
 
-Different providers name the same model differently. `modelMap` rewrites the
-`model` field per member, so a client can keep asking for one name:
+Members use different names for the same model. `modelMap` rewrites the `model`
+field for one member, so a client can always ask for the same name.
 
 ```mermaid
 flowchart LR
-  C["client asks for<br/>claude-sonnet-4-20250514"] --> P["Proem"]
-  P -->|unchanged| A["Anthropic<br/>claude-sonnet-4-20250514"]
-  P -->|rewritten| O["OpenRouter<br/>anthropic/claude-sonnet-4"]
+  C["Client asks for<br/>claude-sonnet-4-20250514"] --> P["Proem"]
+  P -->|name unchanged| A["Anthropic<br/>claude-sonnet-4-20250514"]
+  P -->|name rewritten| O["OpenRouter<br/>anthropic/claude-sonnet-4"]
 ```
 
-Only members with a mapping for that name rewrite it; everyone else forwards
-the model as given.
+Proem rewrites the name only for a member that maps it. Every other member
+receives the name that the client sent.
 
 ## File format
 
-The pool may be written as YAML or JSON. YAML 1.2 is a superset of JSON, so a
-JSON document is parsed identically — same validation, same defaults, same hot
-reload. The extension carries no meaning.
+You can write the pool file as YAML or as JSON. YAML 1.2 includes JSON, so
+Proem parses a JSON document in the same way. It applies the same validation,
+the same defaults and the same reload. The file extension has no effect.
 
 ```json
 {"members":[{"id":"anthropic","type":"anthropic_api",
@@ -81,21 +83,29 @@ reload. The extension carries no meaning.
   "baseURL":"https://api.anthropic.com","weight":3}]}
 ```
 
-## Hot reload
+## Reload
 
-Save the file. The change applies to the next request; there is no restart and
-no dropped connection. Watch it land:
+Save the file. Proem applies the change to the next request. You do not restart
+Proem, and Proem does not drop a connection.
+
+To confirm that Proem applied the change:
 
 ```bash
 curl -s localhost:9090/metrics | grep proem_config_reloads_total
 ```
 
-A rejected edit — a duplicate id, a missing credential, a non-HTTPS URL —
-increments `result="error"`, logs the reason, and leaves the running pool
-untouched. A typo cannot take the proxy down.
+Proem rejects a duplicate `id`, a missing credential, and a base URL that is
+not HTTPS. When Proem rejects a change, it increases the counter with
+`result="error"`, logs the reason, and keeps the running pool. A mistake in the
+file cannot stop the proxy.
 
-## Removing a member
+## Remove a member
 
-Set `enabled: false` to stop routing to it while keeping the record, or delete
-the entry outright. Historical metrics keep the old `member` label either way,
-so past usage stays attributable.
+You have two options:
+
+1. Set `enabled: false`. Proem keeps the record and stops routing to the
+   member.
+2. Delete the entry.
+
+Metrics keep the old `member` label in both cases, so past usage stays
+attributed.
