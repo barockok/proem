@@ -9,6 +9,8 @@
 bin/
 coverage.html
 coverage.out
+docs/site/_site/
+node_modules/
 probe/node_modules/
 probe/workspace/
 vendor/
