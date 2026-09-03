@@ -84,3 +84,23 @@ func loadRegistry(t *testing.T, path, body string) *Registry {
 	}
 	return r
 }
+
+// The shipped example registry must not authenticate anyone. Its digests are
+// placeholders, and the documentation shows a matching placeholder token; if a
+// real digest were ever committed there, a copied example would accept a
+// publicly known token.
+func TestShippedExampleRegistryAuthenticatesNobody(t *testing.T) {
+	r, err := LoadFile("../../clients.yaml.example")
+	if err != nil {
+		t.Fatalf("the example registry must be valid: %v", err)
+	}
+	for _, token := range []string{
+		"sk-ant-oat01-EXAMPLE00000000000000000000000000000000000000",
+		"sk-ant-oat01-y5PRGD7JmUVBqYJ1W_a-2HKRTeuFGkVGXjtTur5pXLc",
+		"", "test", "sk-ant-oat01-",
+	} {
+		if c, ok := r.Lookup(token); ok {
+			t.Fatalf("example registry accepted %q as %s", token, c.Name)
+		}
+	}
+}
