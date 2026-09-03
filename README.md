@@ -13,7 +13,7 @@ export ANTHROPIC_BASE_URL=http://localhost:8080
 export ANTHROPIC_AUTH_TOKEN=sk-ant-oat01-...   # issued by Proem, valid only here
 ```
 
-📖 **[Documentation](https://barockok.github.io/proem/)**
+📖 **[Documentation](docs/site/_content/index.md)** — also published at [barockok.github.io/proem](https://barockok.github.io/proem/)
 
 ## Why
 
@@ -34,22 +34,24 @@ proem --config ./pool.yaml --clients ./clients.yaml \
       --redis-url redis://localhost:6379/0
 ```
 
-Health on `:8080/health`, metrics on `:9090/metrics`. Full walkthrough in the [quickstart](https://barockok.github.io/proem/start/quickstart.html).
+Health on `:8080/health`, metrics on `:9090/metrics`. Full walkthrough in the [quickstart](docs/site/_content/start/quickstart.md).
 
 ## Documentation
 
 | | |
 | --- | --- |
-| [Quickstart](https://barockok.github.io/proem/start/quickstart.html) | Running in about five minutes |
-| [How it works](https://barockok.github.io/proem/start/how-it-works.html) | The request path, end to end |
-| [Pool members](https://barockok.github.io/proem/guides/pool-members.html) | Adding, weighting and mapping upstreams |
-| [Client tokens](https://barockok.github.io/proem/guides/client-tokens.html) | Issuing, revoking, attributing |
-| [Observability](https://barockok.github.io/proem/guides/observability.html) | Access log, auth alerts, client IP |
-| [Architecture](https://barockok.github.io/proem/reference/architecture.html) | Components and state |
-| [Configuration](https://barockok.github.io/proem/reference/configuration.html) | Every flag |
-| [Metrics](https://barockok.github.io/proem/reference/metrics.html) | Every series |
+| [Quickstart](docs/site/_content/start/quickstart.md) | Running in about five minutes |
+| [How it works](docs/site/_content/start/how-it-works.md) | The request path, end to end |
+| [Pool members](docs/site/_content/guides/pool-members.md) | Adding, weighting and mapping upstreams |
+| [Client tokens](docs/site/_content/guides/client-tokens.md) | Issuing, revoking, attributing |
+| [Observability](docs/site/_content/guides/observability.md) | Access log, auth alerts, client IP |
+| [Architecture](docs/site/_content/reference/architecture.md) | Components and state |
+| [Configuration](docs/site/_content/reference/configuration.md) | Every flag |
+| [Metrics](docs/site/_content/reference/metrics.md) | Every series |
+| [Install and upgrade](docs/site/_content/deploy/install.md) | Building, installing, upgrading safely |
+| [Docker](docs/site/_content/deploy/docker.md) | Running from the published image |
 
-Source for the site lives in `docs/site/_content/`.
+These pages are the source of the [published site](https://barockok.github.io/proem/); they render on GitHub too, so the links above work without leaving the repo.
 
 ## Development
 
