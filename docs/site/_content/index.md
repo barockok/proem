@@ -1,80 +1,87 @@
 ---
 title: What is Proem?
-description: A reverse proxy for Anthropic-compatible APIs — one endpoint in front of many upstreams, with per-client tokens, usage attribution and failover.
+description: A reverse proxy for Anthropic-compatible APIs. One endpoint in front of several members, with per-client tokens, usage attribution and failover.
 ---
 
 Proem is a reverse proxy that speaks the Anthropic Messages API. Your clients
-point at Proem instead of an upstream provider, and Proem authenticates the
-caller, selects a healthy upstream from a configured pool, injects that
-upstream's credential, and records what the request consumed — attributed to
-the caller that made it.
+send requests to Proem instead of to a provider. Proem authenticates the
+client, selects a healthy member from a configured pool, adds that member's
+credential, and records what the request used.
 
-Anything that talks to an Anthropic-compatible endpoint works unchanged: the
-Anthropic SDKs, the Claude Agent SDK, Claude Code, or your own HTTP client. It
-is a `ANTHROPIC_BASE_URL` change, nothing more.
+Any software that calls an Anthropic-compatible endpoint works without change.
+This includes the Anthropic SDKs, the Claude Agent SDK, Claude Code, and your
+own HTTP client. You change one setting, `ANTHROPIC_BASE_URL`.
+
+## Terms
+
+Three words have an exact meaning in this documentation.
+
+- **Client**: a caller that Proem authenticates. Each client has a name and a
+  token. The name becomes the `client` label on metrics.
+- **Member**: one entry in the pool. A member has a credential and a base URL.
+- **Pool**: the set of members that Proem can route to.
 
 ## The shape of it
 
 ```mermaid
 flowchart LR
-  A1["Agent A"]
-  A2["Agent B"]
-  A3["Batch job"]
+  A1["Client: agent-maria"]
+  A2["Client: agent-sora"]
+  A3["Client: batch-job"]
   P["Proem<br/>POST /v1/messages"]
-  U1["Anthropic API"]
-  U2["OpenRouter"]
-  U3["Self-hosted<br/>compatible gateway"]
+  U1["Member: Anthropic API"]
+  U2["Member: OpenRouter"]
+  U3["Member: compatible gateway"]
   M["Prometheus<br/>/metrics"]
 
   A1 -->|issued token| P
   A2 -->|issued token| P
   A3 -->|issued token| P
-  P -->|provider credential| U1
-  P -->|provider credential| U2
-  P -->|provider credential| U3
+  P -->|member credential| U1
+  P -->|member credential| U2
+  P -->|member credential| U3
   P -.attributed usage.-> M
 ```
 
-A caller never holds a provider credential. It presents a token Proem issued,
-which is valid only against Proem. Proem swaps it for the pooled credential of
-whichever upstream it routes to.
+A client never holds a member credential. A client sends a token that Proem
+issued. That token works only against Proem. Proem replaces it with the
+credential of the member it selects.
 
-## What it is for
+## What Proem does
 
-**One endpoint over several providers.** A pool can mix the Anthropic API with
-any Anthropic-compatible gateway — OpenRouter, DeepSeek, a self-hosted
-deployment. Per-member model mapping rewrites model names so a client can keep
-asking for the same model regardless of who serves it.
+**It puts one endpoint in front of several members.** A pool can contain the
+Anthropic API and any Anthropic-compatible gateway. Examples are OpenRouter,
+DeepSeek, and a gateway you host. Each member can map model names, so a client
+can ask for one model name whatever member answers.
 
-**Credentials that stay put.** Provider keys live in Proem's configuration,
-read from environment variables or files. Callers get their own issued tokens,
-revocable individually, without redistributing anything.
+**It keeps credentials in one place.** Member credentials stay in Proem's
+configuration. Proem reads them from environment variables or from files.
+Clients get their own tokens. You can revoke one client without changing the
+others.
 
-**Usage you can attribute.** Every request is labelled with the client that
-made it, so `sum by (client) (increase(proem_tokens_total[24h]))` answers who
-consumed what — including cache reads and cache writes, which dominate a cached
-workload and are easy to miss.
+**It attributes usage.** Proem labels each request with the client that sent
+it. The query `sum by (client) (increase(proem_tokens_total[24h]))` reports
+what each client used. The count includes cache reads and cache writes. On a
+cached workload these are larger than the input and output counts.
 
-**Failover that does not break streaming.** When an upstream returns a rate
-limit or an overload, Proem puts it on a cooldown and retries the next member.
-Responses that cannot fail over are streamed straight through, unbuffered, so a
-streaming client still sees tokens as they are produced.
+**It fails over without stopping a stream.** A member can report a rate limit
+or an overload. Proem then puts that member in cooldown and tries the next one.
+Proem sends a response that cannot fail over straight to the client. It does
+not buffer that response, so a streaming client receives tokens as the member
+produces them.
 
-## What it is not
+## What Proem does not do
 
-Proem does not change the terms you have with any provider. It is a routing and
-accounting layer for capacity you are already entitled to use: it holds the
-credentials you configure and sends requests to the endpoints you name. Whether
-a given credential may be used for a given workload is between you and that
-provider.
+Proem does not change the terms of your agreement with a provider. Proem sends
+requests to the endpoints you configure, with the credentials you supply. Your
+agreement with a provider decides whether a credential may serve a workload.
 
-It is also not a model gateway in the translation sense. Proem speaks the
-Anthropic Messages API and forwards it; it does not convert between provider
-API shapes.
+Proem does not translate between API shapes. It speaks the Anthropic Messages
+API and forwards it.
 
 ## Next
 
-- [Quickstart](start/quickstart.md) — running in about five minutes
-- [How it works](start/how-it-works.md) — the request path, end to end
-- [Pool members](guides/pool-members.md) — adding and weighting upstreams
-- [Client tokens](guides/client-tokens.md) — issuing, revoking, attributing
+1. [Quickstart](start/quickstart.md) explains how to run Proem.
+2. [How it works](start/how-it-works.md) explains the path of a request.
+3. [Pool members](guides/pool-members.md) explains how to add a member.
+4. [Client tokens](guides/client-tokens.md) explains how to issue a token.

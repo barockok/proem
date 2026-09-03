@@ -1,19 +1,19 @@
 ---
 title: Install and upgrade
-description: Building, installing and upgrading Proem, including why installation uses an atomic rename.
+description: How to build, install and upgrade Proem, and why the install uses an atomic rename.
 ---
 
-## From source
+## Install from source
 
 ```bash
-make install                      # ~/.local/bin/proem
-make install PREFIX=/usr/local    # /usr/local/bin/proem
+make install                      # installs to ~/.local/bin/proem
+make install PREFIX=/usr/local    # installs to /usr/local/bin/proem
 ```
 
-## From a release
+## Install from a release
 
-Binaries for Linux and macOS are attached to each
-[release](https://github.com/barockok/proem/releases), with `checksums.txt`.
+Each [release](https://github.com/barockok/proem/releases) has binaries for
+Linux and macOS, and a `checksums.txt` file.
 
 ```bash
 gh release download v0.3.2 --repo barockok/proem
@@ -21,45 +21,51 @@ shasum -a 256 -c checksums.txt
 ./scripts/install-binary.sh ./proem-darwin-arm64 ~/.local/bin/proem
 ```
 
-## Why not `cp`
+## Why you must not use cp
 
-Upgrading with `cp` over a binary that is currently running will break it.
-Copying in place reuses the file's inode, and macOS then holds a code signature
-that no longer matches the image it mapped. The path stops being executable —
-it exits `137` — and a running service is killed with `OS_REASON_CODESIGNING`.
+Do not use `cp` to replace a binary that is running. `cp` writes into the same
+inode. On macOS the code signature then does not match the image that the
+kernel mapped. The path stops running and exits with code 137. The kernel stops
+a running service with the reason `OS_REASON_CODESIGNING`.
 
 ```mermaid
 flowchart LR
   subgraph bad["cp over a running binary"]
-    B1["same inode<br/>contents replaced"] --> B2["signature no longer<br/>matches mapped image"] --> B3["exec killed · 137"]
+    B1["same inode<br/>new contents"] --> B2["signature does not match<br/>the mapped image"] --> B3["exec stops, code 137"]
   end
   subgraph good["install-binary.sh"]
-    G1["write temp file<br/>in the same directory"] --> G2["rename over target"] --> G3["running process keeps<br/>its old inode"]
+    G1["write a temporary file<br/>in the same directory"] --> G2["rename it over the target"] --> G3["the running process keeps<br/>its old inode"]
   end
 ```
 
-`scripts/install-binary.sh` writes to a temporary file **in the destination
-directory** — `rename(2)` is only atomic within one filesystem — then renames
-over the target. The running process keeps the old inode and carries on; the
-next start picks up the new file. It also ad-hoc signs anything that arrives
-unsigned, which a locally built `darwin/amd64` binary otherwise is.
+`scripts/install-binary.sh` writes a temporary file in the destination
+directory. `rename(2)` is atomic only inside one filesystem, so the temporary
+file must be there. The script then renames that file over the target. The
+running process keeps the old inode and continues. The next start reads the new
+file.
+
+The script also signs a binary that arrives without a signature. A
+`darwin/amd64` binary that you build on Linux has no signature.
 
 ## macOS
 
-Released darwin binaries are ad-hoc signed in CI, so they run on Apple Silicon
-as downloaded. macOS still quarantines anything fetched with a **browser**:
+CI signs the released macOS binaries with an ad-hoc signature, so they run on
+Apple Silicon as you download them.
+
+macOS marks any file that a **browser** downloads. To remove that mark:
 
 ```bash
 xattr -d com.apple.quarantine ./proem-darwin-arm64
 ```
 
-Downloads made with `curl` or `gh release download` are not quarantined. The
-binaries are not notarised, so Gatekeeper will not treat them as identified.
+Files that you download with `curl` or `gh release download` do not carry the
+mark. The binaries are not notarised, so Gatekeeper does not report them as
+identified.
 
-## Running as a service
+## Run Proem as a service
 
-Proem is a single process with no local state, so any supervisor works. A
-launchd agent on macOS:
+Proem is one process and keeps no state on local disk, so any supervisor can
+run it. This is a launchd agent on macOS:
 
 ```xml
 <key>ProgramArguments</key>
@@ -76,6 +82,7 @@ launchd agent on macOS:
 <key>KeepAlive</key><true/>
 ```
 
-Binding to `127.0.0.1` keeps both the proxy and its metrics off the network.
-Configuration is hot-reloaded, so adding a member or revoking a client does not
-need a restart.
+Bind to `127.0.0.1` to keep the proxy and its metrics off the network.
+
+Proem reloads its configuration after a change, so you do not restart the
+service when you add a member or revoke a client.

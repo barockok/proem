@@ -1,55 +1,57 @@
 ---
 title: Configuration
-description: Command-line flags, defaults, and the files Proem reads.
+description: The command-line options, their defaults, and the files that Proem reads.
 ---
 
-## Flags
+## Options
 
-| Flag | Default | Meaning |
+| Option | Default | Meaning |
 |---|---|---|
-| `--config` | `./pool.yaml` | Pool file. YAML or JSON |
-| `--clients` | `./clients.yaml` | Client registry. Required; Proem is fail-closed |
-| `--redis-url` | `redis://localhost:6379/0` | Cooldown and sticky state. Fails open if unreachable |
-| `--listen` | `:8080` | Proxy address |
-| `--metrics-addr` | `:9090` | Prometheus address |
-| `--sticky-mode` | `lb` | `lb`, `redis` or `none` |
-| `--trusted-proxies` | *(empty)* | CIDRs or IPs whose `X-Forwarded-For` is believed |
-| `--access-log` | `true` | One log line per request |
-| `--log-format` | `text` | `text` or `json` |
-| `--read-timeout` | `10s` | Request read timeout |
-| `--write-timeout` | `60s` | Response write timeout |
-| `--upstream-timeout` | `60s` | Time an upstream may take to **respond** |
+| `--config` | `./pool.yaml` | The pool file. YAML or JSON. |
+| `--clients` | `./clients.yaml` | The client registry. It is required, because Proem is fail-closed. |
+| `--redis-url` | `redis://localhost:6379/0` | Cooldown and affinity state. Proem fails open if Redis is not available. |
+| `--listen` | `:8080` | The address of the proxy. |
+| `--metrics-addr` | `:9090` | The address of the metrics endpoint. |
+| `--sticky-mode` | `lb` | `lb`, `redis` or `none`. |
+| `--trusted-proxies` | empty | The CIDR ranges or addresses whose `X-Forwarded-For` header Proem reads. |
+| `--access-log` | `true` | Write one log line for each request. |
+| `--log-format` | `text` | `text` or `json`. |
+| `--read-timeout` | `10s` | How long Proem waits to read a request. |
+| `--write-timeout` | `60s` | How long Proem waits to write a response. |
+| `--upstream-timeout` | `60s` | How long a member has to start a response. |
 
-`--upstream-timeout` bounds the wait for response headers, not the duration of
-a stream. A long generation is never truncated by it.
+`--upstream-timeout` limits the wait for the response headers. It does not
+limit the length of a stream, so it never cuts a long generation.
 
-## Subcommands
+## Commands
 
 ```bash
-proem issue-token <name>   # mint a client token and print its registry entry
-proem version              # print the build version
+proem issue-token <name>   # create a client token and print its registry entry
+proem version              # print the version of the build
 ```
 
 ## Endpoints
 
-| Path | Auth | Purpose |
+| Path | Authentication | Purpose |
 |---|---|---|
-| `/health` | none | Liveness probe. Returns `ok` |
-| `/api/hello` | none | Client reachability probe |
-| `/*` | required | Proxied to a pool member |
-| `/metrics` (metrics port) | none | Prometheus exposition |
+| `/health` | none | Liveness probe. It returns `ok`. |
+| `/api/hello` | none | Reachability probe for clients. |
+| `/*` | required | Proem forwards the request to a member. |
+| `/metrics`, on the metrics port | none | Prometheus metrics. |
 
-`/health` and `/api/hello` are answered locally so probes do not consume
-upstream quota or pollute the auth-failure metric. Bind the metrics address to
-a private interface if the proxy is exposed.
+Proem answers `/health` and `/api/hello` itself. These probes therefore do not
+use member quota and do not increase the authentication failure counter.
+
+Bind the metrics address to a private interface if the proxy is reachable from
+a network.
 
 ## Files
 
-Both files are validated on load and on every change, and may be written as
-YAML or JSON.
+Proem validates both files when it loads them and after every change. You can
+write either file as YAML or as JSON.
 
-- **Pool** — see [pool members](../guides/pool-members.md)
-- **Clients** — see [client tokens](../guides/client-tokens.md)
+- [Pool members](../guides/pool-members.md) describes the pool file.
+- [Client tokens](../guides/client-tokens.md) describes the client registry.
 
-Credentials are never written in either file; they are referenced by `env:` or
-`file:` and read from the process environment or disk.
+Neither file contains a credential. Each member points to an environment
+variable or to a file, and Proem reads the credential from there.
