@@ -1,6 +1,6 @@
 # SSO Gateway Login for Claude Code
 
-- **Status:** Draft, pending review
+- **Status:** Draft, revised after review (2026-10-19)
 - **Date:** 2026-10-19
 - **Target release:** v0.5.0
 
@@ -18,9 +18,11 @@ signed-in email to exactly one client in `clients.yaml`.
 2. Only users whose verified email matches a `clients.yaml` entry get a token.
 3. Usage, metrics, and sticky routing attribute to that client name, same as token clients today.
 4. Removing or disabling the client in `clients.yaml` rejects the next request (401/403).
-5. Disabling the user at the provider (or ending their session) stops access at the next refresh
-   (at most `session-ttl`, default 1h).
-6. Existing `sk-ant-oat01-` clients work unchanged.
+5. Disabling the user at the provider (or revoking their refresh or offline tokens) stops access
+   at the next refresh (at most `session-ttl`, default 1h).
+6. Every SSO session ends at most `session-max` (default 30d) after login, whatever the IdP
+   refresh token lifetime.
+7. Existing `sk-ant-oat01-` clients work unchanged.
 
 ## Non-goals
 
@@ -82,11 +84,11 @@ New package `internal/gateway`. One responsibility per file.
 |---|---|
 | `gateway.go` | `Config`, `New(...)`, `Routes(chi.Router)`; wires the parts below |
 | `metadata.go` | `GET /.well-known/oauth-authorization-server` (RFC 8414; same-origin endpoints, `grant_types_supported`) |
-| `device.go` | `POST /oauth/device_authorization`; `GET /device` confirm page; `POST /device` redirect to IdP |
-| `callback.go` | `GET /oauth/callback`: check state, exchange code with PKCE verifier, verify ID token, resolve client, mark grant |
+| `device.go` | `POST /oauth/device_authorization`; `GET /device` confirm page; `POST /device` redirect to IdP; per-IP rate limit on `/device` |
+| `callback.go` | `GET /oauth/callback`: check state, exchange code with PKCE verifier, verify ID token and nonce, resolve client, mark grant |
 | `token.go` | `POST /oauth/token`: `device_code` and `refresh_token` grants |
-| `session.go` | Issue and verify proem JWT (HS256, multi-key); encrypt and decrypt refresh blobs (AES-256-GCM) |
-| `grants.go` | Redis-backed grant store (create, get by device code, get by user code, approve, deny, poll rate) |
+| `session.go` | Issue and verify proem JWT (HS256 only, multi-key); encrypt and decrypt refresh blobs (AES-256-GCM, multi-key) |
+| `grants.go` | Redis-backed grant store (create, get by device code, get by user code, approve, deny, poll rate, atomic consume). Owns its own `redis.UniversalClient` built from `--redis-url`; `internal/store` is unchanged |
 | `oidc.go` | Provider abstraction over `coreos/go-oidc` + `golang.org/x/oauth2`: auth URL, exchange, refresh, userinfo fallback, claim checks |
 | `stubs.go` | `GET /managed/settings` -> 404; `POST /v1/{metrics,logs,traces}` -> 200, body discarded (JWT required) |
 
@@ -98,11 +100,18 @@ Changes to existing code:
 - `internal/proxy/auth.go`: new optional `SessionVerifier` dependency. If set and the bearer token
   verifies as a proem JWT, resolve the client via `LookupEmail`. Otherwise fall through to the
   existing hash lookup. `IsEnabled`, credential stripping, and context tagging stay shared.
-- `internal/app/app.go`: when enabled, mount gateway routes before the `/*` catch-all.
-  Pass the verifier to `proxy.Auth`.
+- `internal/app/app.go`: when enabled, mount gateway routes next to the `/*` catch-all, wrapped
+  in the same `RealIP` and `AccessLog` middleware so gateway requests log the caller's address.
+  Pass the verifier to `proxy.Auth`. When the gateway is enabled, `New` pings Redis and fails
+  startup if it is unreachable (the proxy-only fail-open behaviour is unchanged when the gateway
+  is off). After startup, a Redis outage makes login and refresh return 503; runtime requests
+  with a valid JWT are unaffected.
 - `internal/config/config.go`: new flags and env (below). Startup error if the gateway is enabled
-  without Redis, OIDC issuer, client credentials, JWT secret, or refresh key.
-- `cmd/proem`: optional TLS listener when `--tls-cert` and `--tls-key` are set.
+  without an OIDC issuer, client credentials, JWT secret, or refresh key.
+- `internal/app/app.go` (`Run`): serve the proxy listener with TLS when `--tls-cert` and
+  `--tls-key` are set.
+- `internal/client/loader.go`: depends on the watcher fix (separate PR) that watches the parent
+  directory, so `clients.yaml` revocation survives atomic replaces and ConfigMap symlink swaps.
 - `clients.yaml.example`, README, docs site: document `email` entries and gateway setup.
 
 ## Data
@@ -126,25 +135,35 @@ clients:
 - HS256. Header `kid` = first 8 bytes of sha256(secret), hex.
 - Claims: `iss` = public URL, `aud` = `proem`, `sub` = IdP subject, `email`, `iat`, `exp`
   (`iat` + `session-ttl`).
-- Verification: signature against any configured key (rotation), `iss`, `aud`, `exp` with 60s skew.
+- Verification: `alg` must be `HS256` (any other value, including `none`, is rejected before key
+  lookup), signature against any configured key (rotation), `iss`, `aud`, `exp` with 60s skew.
 - The JWT does not carry the client name. The client is resolved from `email` on every request so
   `clients.yaml` changes take effect immediately.
 
 ### Refresh token (returned to the client)
 
-- `prt1.` + base64url(AES-256-GCM(nonce, JSON{idp_refresh_token, sub, email, iat})).
+- `prt1.` + base64url(key_id(4 bytes) || AES-256-GCM(nonce, JSON{idp_refresh_token, sub, email,
+  auth_time})). `key_id` = first 4 bytes of sha256(key). The first configured key encrypts; any
+  configured key decrypts, so the refresh key rotates the same way as the JWT secret.
+- `auth_time` is the time of the original SSO login. It is carried unchanged through every
+  refresh. A refresh after `auth_time + session-max` returns `invalid_grant`, which forces a new
+  `/login`. This caps the session even when the IdP refresh token never expires (Google).
 - Opaque to the client. The IdP refresh token is never exposed in clear.
-- Decryption failure or unknown prefix -> `invalid_grant`.
+- Decryption failure, unknown prefix, or unknown `key_id` -> `invalid_grant`.
 
 ### Device grant (Redis)
 
 - Keys: `proem:gw:dc:<sha256(device_code)>` -> JSON grant; `proem:gw:uc:<user_code>` -> device code hash.
-- Grant: `{status: pending|approved|denied|consumed, user_code, pkce_verifier, state, email,
-  sub, enc_refresh, last_poll, created}`. TTL `--device-grant-ttl` (default 600s).
+- Grant: `{status: pending|approved|denied|consumed, user_code, pkce_verifier, state, nonce,
+  email, sub, enc_refresh, last_poll, created, requester_ip}`. TTL `--device-grant-ttl`
+  (default 600s). `requester_ip` is the IP that called `/oauth/device_authorization`, shown on the
+  confirm page.
 - `device_code`: 32 random bytes, base64url. `user_code`: 8 chars from
   `BCDFGHJKMNPQRSTVWXYZ`, displayed `XXXX-XXXX`.
 - Poll faster than `interval` (5s) -> `slow_down`. Approved grant is consumed on first successful
-  token exchange (single use).
+  token exchange (single use). Consumption is one Lua script that checks `status == approved` and
+  sets `status = consumed` atomically, so two concurrent polls cannot both receive tokens. The
+  loser gets `invalid_grant`.
 
 ## Flows
 
@@ -152,13 +171,22 @@ clients:
 
 1. `POST /oauth/device_authorization` creates a pending grant. Response uses
    `verification_uri = {public}/device` and `verification_uri_complete = {public}/device?user_code=...`.
-2. `GET /device?user_code=...` shows the code and a "Continue to sign in" button (CSRF-protected
-   form). Unknown or expired code -> error page.
-3. `POST /device` generates `state` and PKCE verifier, stores them on the grant, sets a short-lived
-   HttpOnly `gw_dev` cookie binding the browser to the grant, and redirects to the IdP authorize URL
-   with configured scopes and extra params.
+2. `GET /device?user_code=...` shows the confirm page (CSRF-protected form). Unknown or expired
+   code -> error page. Defense against device-code phishing (RFC 8628 section 5.4):
+   - The page states: "Only continue if you just ran `/login` in Claude Code on your own
+     computer. If someone sent you this link, close this page."
+   - The page shows when the request started and `requester_ip`.
+   - The user must type the code shown in their terminal. A `user_code` in the URL is not
+     accepted as confirmation by itself; it only pre-selects the grant for the comparison.
+     The typed code is compared in constant time.
+3. `POST /device` generates `state`, `nonce`, and PKCE verifier, stores them on the grant, sets a
+   short-lived `gw_dev` cookie (`HttpOnly`, `Secure`, `SameSite=Lax`, path `/oauth/callback`)
+   binding the browser to the grant, and redirects to the IdP authorize URL with configured scopes,
+   `nonce`, and extra params. `SameSite=Lax` is required: `Strict` drops the cookie on the IdP's
+   cross-site redirect.
 4. `GET /oauth/callback` checks `state` against the cookie-bound grant, exchanges the code, and
-   verifies the ID token (issuer, audience, nonce, expiry). Required: `email`, `email_verified=true`.
+   verifies the ID token (issuer, audience, `nonce` equal to the grant's, expiry). Required:
+   `email`, `email_verified=true`.
    If `--oidc-allowed-domain` is set, the email domain (and Google `hd` claim when present) must match.
 5. `LookupEmail(email)`: found and enabled -> grant approved, store encrypted IdP refresh token,
    page says "Signed in. Return to Claude Code." Not found or disabled -> grant denied, page says
@@ -167,12 +195,20 @@ clients:
 
 ### Refresh
 
-1. Decrypt refresh blob. Call the IdP token endpoint with `grant_type=refresh_token` (server side).
+1. Decrypt refresh blob. Reject with `invalid_grant` if `auth_time + session-max` has passed.
+   Call the IdP token endpoint with `grant_type=refresh_token` (server side).
 2. Take identity from the new ID token if returned, else call the userinfo endpoint. `sub` must equal
    the original `sub`.
 3. Re-check `LookupEmail` and `IsEnabled`.
 4. Issue a new JWT. Return a new refresh blob wrapping the rotated IdP refresh token if the IdP
-   returned one, otherwise the original.
+   returned one, otherwise the original. `auth_time` is copied from the old blob.
+
+Concurrent refresh: several Claude Code processes on one laptop share the stored credential and
+can refresh at the same moment with the same blob. If the IdP revokes a refresh token on use
+(Keycloak "Revoke Refresh Token"), the second refresh fails and the client drops the login.
+Proem does not add a refresh lock in v0.5.0; instead the Keycloak setup requires that option off
+(see Provider notes). Revisit with a short Redis lock keyed by blob hash if reuse detection is
+ever required.
 
 ### Runtime
 
@@ -193,8 +229,10 @@ rejected as `invalid_session` (401), not passed to the hash lookup.
 | `--oidc-auth-params` | `OIDC_AUTH_PARAMS` | empty | Google: `access_type=offline,prompt=consent` |
 | `--oidc-allowed-domain` | `OIDC_ALLOWED_DOMAIN` | empty | Optional email domain restriction |
 | | `PROEM_JWT_SECRET` | | Vault. Comma list, each >= 32 bytes. First signs, all verify |
-| | `PROEM_REFRESH_KEY` | | Vault. 32 bytes, base64 |
-| `--session-ttl` | `PROEM_SESSION_TTL` | `1h` | |
+| | `PROEM_REFRESH_KEY` | | Vault. Comma list, each 32 bytes base64. First encrypts, all decrypt |
+| `--session-ttl` | `PROEM_SESSION_TTL` | `1h` | Access token (JWT) lifetime |
+| `--session-max` | `PROEM_SESSION_MAX` | `720h` (30d) | Maximum time from SSO login to last allowed refresh |
+| `--device-rate-limit` | | `10/min` | Per-IP limit on `GET`/`POST /device` |
 | `--device-grant-ttl` | | `10m` | Device grant lifetime (e2e shortens it) |
 | `--tls-cert`, `--tls-key` | | empty | Optional native TLS for the proxy listener |
 
@@ -211,6 +249,18 @@ Redirect URI to register at the IdP: `{public-url}/oauth/callback`.
 
 Both handled by the same code path; differences are configuration only.
 
+### Required Keycloak client and realm settings
+
+- Client `proem`: confidential, standard flow on, PKCE `S256` required, redirect URI
+  `{public-url}/oauth/callback`.
+- Scope `offline_access` in `--oidc-scopes`. Without it, refresh tokens die with the SSO session
+  ("SSO Session Idle" default 30 min, "SSO Session Max" default 10h), so a laptop that sleeps
+  overnight needs a new `/login` every day. Trade-off: offline sessions survive "log out" and
+  "end sessions" in the admin console. To cut off a user, disable the user (or revoke their
+  offline sessions), not only end the SSO session.
+- Realm "Revoke Refresh Token": off. With it on, concurrent refreshes from one laptop log the
+  user out (see Flows: Refresh).
+
 ## Errors
 
 | Case | Response |
@@ -219,31 +269,52 @@ Both handled by the same code path; differences are configuration only.
 | Client disabled | 403 `permission_error` |
 | Email not in `clients.yaml` at runtime | 401 `authentication_error`, reason `unknown_email` |
 | Token endpoint, pending/slow/expired/denied | 400 OAuth `error` per RFC 8628 |
-| Refresh rejected by IdP or user removed | 400 `invalid_grant` |
-| IdP or Redis unreachable during refresh/login | 503 `temporarily_unavailable` |
-| Redis down | Login fails (503). Runtime requests with valid JWT unaffected |
+| Refresh rejected by IdP, user removed, or `session-max` passed | 400 `invalid_grant` |
+| IdP or Redis unreachable during refresh/login | 503 `temporarily_unavailable` (1) |
+| Redis down after startup | Login fails (503). Runtime requests with valid JWT unaffected |
+| `/device` rate limit exceeded | 429 HTML page, `AuthFailures{reason="device_rate_limited"}` |
+| Wrong code typed on `/device` | Error page, `AuthFailures{reason="device_code_mismatch"}` |
+
+(1) RFC 6749 defines `temporarily_unavailable` for the authorization endpoint, not the token
+endpoint. It is used here because the client retries every token error except `invalid_grant`,
+so the user keeps their login through a short IdP or Redis outage.
 
 All rejections increment `metrics.AuthFailures{reason}` and log without the token (fingerprint only),
 matching existing behaviour.
 
 ## Security
 
-- Device code and user code high entropy; user code single-use; grant TTL 600s; poll rate limited.
-- PKCE (S256) and `state` on the IdP leg; `gw_dev` cookie binds callback to the browser that started it.
+- Device-code phishing: an attacker can start a device flow and send the victim the
+  `verification_uri_complete` link. If the victim already has an IdP session, one click would
+  otherwise approve the attacker's grant. Mitigations: the confirm page warning, the requester
+  IP and start time on the page, and the typed-code requirement (Flows: Login, step 2).
+- Device code 32 random bytes. User code about 34.6 bits (20^8), so `/device` is rate limited
+  per IP (`--device-rate-limit`) and failures are counted. User code single-use; grant TTL 600s;
+  token poll rate limited (`slow_down`). Device code consumption is atomic.
+- PKCE (S256), `state`, and `nonce` on the IdP leg; `gw_dev` cookie binds callback to the
+  browser that started it.
 - `/device` POST is CSRF-protected.
+- Gateway routes pass through `RealIP` and `AccessLog`, so rate limits and logs use the caller's
+  address.
 - IdP refresh token only ever stored encrypted (client side) and in Redis for at most the grant TTL.
-- JWT secrets and refresh key from Vault, never logged. Secret rotation via comma list.
+- Session lifetime capped by `session-max` regardless of IdP refresh token lifetime.
+- JWT `alg` pinned to `HS256`.
+- JWT secrets and refresh keys from Vault, never logged. Both rotate via comma list.
 - Constant-time comparisons for codes. No token values in logs.
+- Revocation through `clients.yaml` relies on the directory-based file watcher (separate PR).
 
 ## Testing
 
-- Unit: JWT issue/verify (expiry, bad signature, wrong `iss`/`aud`, rotation); refresh blob round
-  trip and tamper rejection; registry email index (case-insensitive, duplicates, email-only,
+- Unit: JWT issue/verify (expiry, bad signature, wrong `iss`/`aud`, rotation, `alg=none`,
+  non-HS256 `alg`); refresh blob round trip, tamper rejection, key rotation, unknown `key_id`,
+  `session-max` expiry; registry email index (case-insensitive, duplicates, email-only,
   token-only, both); `Auth` with JWT, hash token, malformed JWT, disabled client.
 - Gateway integration: `httptest` fake OIDC provider (discovery, JWKS, authorize, token, userinfo)
   plus `miniredis`. Cover full device flow, `slow_down`, expiry, denied (not registered,
   `email_verified=false`, wrong domain), refresh success with and without rotation, refresh
-  `invalid_grant`, IdP down (503), `sub` mismatch on refresh.
+  `invalid_grant`, IdP down (503), `sub` mismatch on refresh, wrong `nonce`, wrong typed code,
+  `/device` rate limit (429), concurrent device-code polls (exactly one gets tokens), gateway
+  enabled with Redis unreachable at startup (startup error).
 - Regression: all existing tests pass unchanged.
 - staging end to end: Keycloak test client and a disposable Claude Code container with managed policy pointing at
   `https://proem.staging.example.com`. `/login`, send a message, force refresh, remove email from
@@ -275,7 +346,7 @@ e2e/
 | `keycloak` | `quay.io/keycloak/keycloak:<pinned>` | `start-dev --import-realm`, health on management port. Issuer `http://keycloak:8080/realms/proem` |
 | `redis` | `redis:7-alpine` | Device grants and sticky store |
 | `mock-upstream` | built from `e2e/mock-upstream` | Stands in for `api.anthropic.com`. Exposes `GET /_requests` for assertions |
-| `proem` | built from repo `Dockerfile` | Gateway on, native TLS (`--tls-cert/--tls-key`), `--public-url=https://proem:8443`, `clients.yaml` bind-mounted read-write so tests can edit it |
+| `proem` | built from repo `Dockerfile` | Gateway on, native TLS (`--tls-cert/--tls-key`), `--public-url=https://proem:8443`, the directory holding `clients.yaml` bind-mounted read-write (shared with `driver`) so tests can edit it |
 | `driver` | built from `e2e/driver` | Runs `go test -tags e2e ./...`; trusts the generated CA; exits non-zero on failure |
 | `claude` | built from `e2e/claude` (profile `claude`) | Real Claude Code CLI, pinned version, for the client-compat smoke |
 
@@ -285,7 +356,8 @@ and proem are healthy.
 ### Keycloak realm fixture
 
 - Realm `proem`. Confidential client `proem`, fixed test secret, standard flow on, redirect URI
-  `https://proem:8443/oauth/callback`, PKCE S256 required.
+  `https://proem:8443/oauth/callback`, PKCE S256 required, `offline_access` scope allowed.
+  Realm "Revoke Refresh Token" off, matching the required production settings.
 - Users (password login, no required actions):
   - `alice@example.com`, email verified. In `clients.yaml` as client `alice`.
   - `bob@example.com`, email verified. Not in `clients.yaml`.
@@ -297,9 +369,9 @@ and proem are healthy.
 
 The driver plays both parties. As **Claude Code** it does discovery, device authorization, and
 polling exactly as the 2.1.197 client does. As the **browser** it uses an HTTP client with a cookie
-jar: open `verification_uri_complete`, submit the `/device` form (CSRF token parsed from HTML),
-follow the redirect to the Keycloak login page, post the login form, follow the redirect to
-`/oauth/callback`. No headless browser is needed.
+jar: open `verification_uri_complete`, submit the `/device` form with the typed user code (CSRF
+token parsed from HTML), follow the redirect to the Keycloak login page, post the login form,
+follow the redirect to `/oauth/callback`. No headless browser is needed.
 
 1. Discovery: metadata endpoints are same-origin; `gateway_protocol_version` present.
 2. Happy path: alice logs in; poll returns `authorization_pending` before approval and the token
@@ -308,16 +380,24 @@ follow the redirect to the Keycloak login page, post the login form, follow the 
    pool member's credential, never the JWT, and proem metrics label the request `client="alice"`.
 4. Poll faster than `interval` returns `slow_down`.
 5. Refresh: `grant_type=refresh_token` returns a new pair; the new JWT works.
-6. Revocation via clients.yaml: driver removes alice's entry (file watch reload). Next request is
-   401 and the next refresh is `invalid_grant`. Entry restored afterwards.
-7. Revocation via IdP: driver disables alice through the Keycloak admin API and ends her sessions.
-   Refresh returns `invalid_grant`. User re-enabled afterwards.
+6. Revocation via clients.yaml: driver removes alice's entry by writing a temp file and renaming
+   it over `clients.yaml` (atomic replace, as editors and ConfigMaps do). Next request is 401 and
+   the next refresh is `invalid_grant`. Entry restored afterwards by a second atomic replace, and
+   alice works again. This proves the watcher survives replacement. The directory mount makes
+   the rename possible; a single-file bind mount returns `EBUSY` on rename.
+7. Revocation via IdP: driver disables alice through the Keycloak admin API. Refresh returns
+   `invalid_grant`. User re-enabled afterwards. (Ending sessions alone is not tested as
+   revocation: offline sessions survive it by design.)
 8. Denials: bob ends with `access_denied` and the "not registered" page; dave is rejected for
    `email_verified=false`.
 9. Expiry: a grant left pending past its TTL returns `expired_token` (TTL shortened via test flag).
 10. Legacy: an `sk-ant-oat01-` client in `clients.yaml` still works, with or without the gateway.
-11. Hardening: tampered JWT, JWT signed with an unknown key, tampered refresh blob, and wrong
-    `state` on the callback are all rejected.
+11. Hardening: tampered JWT, JWT signed with an unknown key, `alg=none` JWT, tampered refresh
+    blob, wrong `state` on the callback, and a wrong typed user code are all rejected.
+12. Concurrent consume: two polls for the same approved device code in parallel; exactly one
+    receives tokens.
+13. Session max: with `--session-max` shortened via test flag, a refresh after it passes returns
+    `invalid_grant`.
 
 ### Real Claude Code smoke
 
@@ -373,4 +453,8 @@ rotation, `hd` claim, extra auth params) is covered by the fake-provider integra
   The client pins the leaf certificate, so certificate rotation forces users to re-trust.
 - The protocol is from an undocumented Claude Code build (2.1.197). Future versions may change it.
   The `gateway_protocol_version: 1` field is advertised in metadata to match the built-in gateway.
+  Before implementation, confirm the request shapes against the current release with a
+  logging stub at `forceLoginGatewayUrl`. Record the source of each protocol claim (client
+  version, how it was observed) next to this section, so it can be checked again when the
+  pinned Claude Code version is bumped.
 - `forceLoginGatewayUrl` is honoured only from admin-controlled managed settings.
