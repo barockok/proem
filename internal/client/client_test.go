@@ -173,3 +173,65 @@ func TestIssueAndDescribeRejectsBadName(t *testing.T) {
 		t.Fatalf("nothing should be printed for a rejected name, got: %s", out.String())
 	}
 }
+
+func TestValidateEmailClients(t *testing.T) {
+	good := validDigest("t1")
+	cases := []struct {
+		name    string
+		reg     Registry
+		wantErr bool
+	}{
+		{"email only", Registry{Clients: []Client{{Name: "alice", Email: "alice@example.com"}}}, false},
+		{"token only", Registry{Clients: []Client{{Name: "a", TokenSHA256: good}}}, false},
+		{"both", Registry{Clients: []Client{{Name: "a", TokenSHA256: good, Email: "a@example.com"}}}, false},
+		{"neither", Registry{Clients: []Client{{Name: "a"}}}, true},
+		{"not an email", Registry{Clients: []Client{{Name: "a", Email: "alice"}}}, true},
+		{"duplicate email ignoring case", Registry{Clients: []Client{
+			{Name: "a", Email: "Alice@Example.com"}, {Name: "b", Email: "alice@example.com"},
+		}}, true},
+	}
+	for _, tc := range cases {
+		reg := tc.reg
+		err := reg.Validate()
+		if (err != nil) != tc.wantErr {
+			t.Fatalf("%s: err=%v wantErr=%v", tc.name, err, tc.wantErr)
+		}
+	}
+}
+
+func TestLookupEmail(t *testing.T) {
+	reg := Registry{Clients: []Client{
+		{Name: "alice", Email: "Alice@Example.com"},
+		{Name: "bob", Email: "bob@example.com", Enabled: enabled(false)},
+		{Name: "agent", TokenSHA256: validDigest("tok")},
+	}}
+	if err := reg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	c, ok := reg.LookupEmail("alice@example.COM")
+	if !ok || c.Name != "alice" {
+		t.Fatalf("case-insensitive lookup failed: %+v %v", c, ok)
+	}
+	if c.Email != "alice@example.com" {
+		t.Fatalf("email must be stored lowercase, got %q", c.Email)
+	}
+	if b, ok := reg.LookupEmail(" bob@example.com "); !ok || b.IsEnabled() {
+		t.Fatalf("disabled client must resolve and report disabled: %+v %v", b, ok)
+	}
+	for _, miss := range []string{"", "carol@example.com"} {
+		if _, ok := reg.LookupEmail(miss); ok {
+			t.Fatalf("%q must not resolve", miss)
+		}
+	}
+	// Email-only clients have no digest and must never match a token.
+	if _, ok := reg.Lookup(""); ok {
+		t.Fatal("empty token must not resolve")
+	}
+	if a, ok := reg.Lookup("tok"); !ok || a.Name != "agent" {
+		t.Fatal("token client must still resolve next to email clients")
+	}
+	var nilReg *Registry
+	if _, ok := nilReg.LookupEmail("alice@example.com"); ok {
+		t.Fatal("nil registry must not resolve")
+	}
+}

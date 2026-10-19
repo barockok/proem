@@ -32,6 +32,12 @@ func withClient(ctx context.Context, name string) context.Context {
 // registryLoader is the subset of client.Loader the middleware needs.
 type registryLoader interface{ Active() *client.Registry }
 
+// SessionVerifier verifies an SSO session token issued by the gateway and
+// returns the email it was issued for.
+type SessionVerifier interface {
+	VerifySession(token string) (email string, err error)
+}
+
 // Auth authenticates callers against the client registry. The presented token
 // is stripped from the request so it never reaches an upstream: the pool
 // member's own credential is injected downstream instead.
@@ -40,6 +46,14 @@ type registryLoader interface{ Active() *client.Registry }
 // The token itself is never logged; a short digest fingerprint is recorded
 // instead, which is enough to correlate repeated attempts.
 func Auth(loader registryLoader, logger *slog.Logger, next http.Handler) http.Handler {
+	return AuthWithSessions(loader, nil, logger, next)
+}
+
+// AuthWithSessions is Auth that also accepts SSO session tokens. When
+// sessions is set, a token shaped like a JWT must verify as a session and
+// resolves to a client by email; it never falls through to the hash lookup.
+// Every other token takes the hash lookup unchanged.
+func AuthWithSessions(loader registryLoader, sessions SessionVerifier, logger *slog.Logger, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reject := func(status int, reason, errType, message string, attrs ...slog.Attr) {
 			metrics.AuthFailures.WithLabelValues(reason).Inc()
@@ -61,8 +75,23 @@ func Auth(loader registryLoader, logger *slog.Logger, next http.Handler) http.Ha
 			return
 		}
 
-		c, ok := loader.Active().Lookup(token)
-		if !ok {
+		var c client.Client
+		var ok bool
+		if sessions != nil && looksLikeJWT(token) {
+			email, err := sessions.VerifySession(token)
+			if err != nil {
+				reject(http.StatusUnauthorized, "invalid_session", "authentication_error",
+					"invalid or expired session: run /login in Claude Code",
+					slog.String("token_fp", tokenFingerprint(token)))
+				return
+			}
+			if c, ok = loader.Active().LookupEmail(email); !ok {
+				reject(http.StatusUnauthorized, "unknown_email", "authentication_error",
+					"this account is not registered with the proxy",
+					slog.String("email", email))
+				return
+			}
+		} else if c, ok = loader.Active().Lookup(token); !ok {
 			reject(http.StatusUnauthorized, "unknown_token", "authentication_error",
 				"invalid credentials: this token is not registered with the proxy",
 				slog.String("token_fp", tokenFingerprint(token)))
@@ -81,6 +110,23 @@ func Auth(loader registryLoader, logger *slog.Logger, next http.Handler) http.Ha
 		}
 		next.ServeHTTP(w, r.WithContext(withClient(r.Context(), c.Name)))
 	})
+}
+
+// looksLikeJWT reports whether token is three dot-separated base64url parts.
+// Issued sk-ant-oat01- tokens never contain a dot.
+func looksLikeJWT(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	for _, p := range parts {
+		for _, r := range p {
+			if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // tokenFingerprint returns a short, non-reversible handle for a rejected

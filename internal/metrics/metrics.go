@@ -44,7 +44,7 @@ var (
 
 	AuthFailures = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "proem_auth_failures_total",
-		Help: "Rejected requests by reason (missing_credentials, unknown_token, client_disabled)",
+		Help: "Rejected requests and logins by reason (missing_credentials, unknown_token, invalid_session, unknown_email, client_disabled, device_*, sso_*, refresh_*)",
 	}, []string{"reason"})
 
 	ConfigReloads = promauto.NewCounterVec(prometheus.CounterOpts{

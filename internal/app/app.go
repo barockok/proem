@@ -15,6 +15,7 @@ import (
 	"github.com/barockok/proem/internal/client"
 	"github.com/barockok/proem/internal/clientip"
 	"github.com/barockok/proem/internal/config"
+	"github.com/barockok/proem/internal/gateway"
 	"github.com/barockok/proem/internal/metrics"
 	"github.com/barockok/proem/internal/pool"
 	"github.com/barockok/proem/internal/proxy"
@@ -22,6 +23,7 @@ import (
 	"github.com/barockok/proem/internal/store"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 )
 
 // App holds the running proxy's components.
@@ -30,6 +32,7 @@ type App struct {
 	loader  *pool.Loader
 	clients *client.Loader
 	store   *store.Store
+	gwRedis redis.UniversalClient
 	done    chan struct{}
 
 	handler     http.Handler
@@ -39,8 +42,15 @@ type App struct {
 
 // New builds an App from cfg: loads the pool, starts the config watcher and
 // connects to Redis. A Redis failure is non-fatal: the proxy runs fail-open
-// with cooldown and sticky disabled.
+// with cooldown and sticky disabled. With the SSO gateway enabled, Redis
+// holds device grants, so an unreachable Redis is a startup error.
 func New(cfg config.Config) (*App, error) {
+	return NewWithProvider(cfg, nil)
+}
+
+// NewWithProvider is New with an injected identity provider for the SSO
+// gateway; nil builds the OpenID Connect provider from cfg.
+func NewWithProvider(cfg config.Config, provider gateway.Provider) (*App, error) {
 	logger := newLogger(cfg)
 
 	resolver, err := clientip.NewResolver(cfg.TrustedProxies)
@@ -79,6 +89,21 @@ func New(cfg config.Config) (*App, error) {
 		}
 	}
 
+	var gw *gateway.Gateway
+	var gwRedis redis.UniversalClient
+	if cfg.Gateway.Enabled() {
+		gw, gwRedis, err = newGateway(cfg, provider, clients, logger)
+		if err != nil {
+			close(done)
+			_ = loader.Close()
+			_ = clients.Close()
+			if st != nil {
+				_ = st.Close()
+			}
+			return nil, err
+		}
+	}
+
 	h := proxy.NewHandler(loader, router.New(st), st, string(cfg.StickyMode), cfg.UpstreamTimeout)
 
 	mux := chi.NewRouter()
@@ -96,17 +121,35 @@ func New(cfg config.Config) (*App, error) {
 	})
 	// RealIP runs outermost so both the access log and auth rejections see the
 	// caller's address; AccessLog wraps Auth so rejected requests are logged too.
-	var handler http.Handler = proxy.Auth(clients, logger, h)
+	var sessions proxy.SessionVerifier
+	if gw != nil {
+		sessions = gw.Sessions()
+	}
+	var handler http.Handler = proxy.AuthWithSessions(clients, sessions, logger, h)
 	if cfg.AccessLog {
 		handler = proxy.AccessLog(logger, handler)
 	}
 	mux.Handle("/*", proxy.RealIP(resolver, handler))
+	if gw != nil {
+		// Gateway routes get the same RealIP and access log as the proxy, so
+		// rate limits and logs use the caller's address.
+		mux.Group(func(r chi.Router) {
+			r.Use(func(next http.Handler) http.Handler {
+				if cfg.AccessLog {
+					next = proxy.AccessLog(logger, next)
+				}
+				return proxy.RealIP(resolver, next)
+			})
+			gw.Routes(r)
+		})
+	}
 
 	return &App{
 		cfg:         cfg,
 		loader:      loader,
 		clients:     clients,
 		store:       st,
+		gwRedis:     gwRedis,
 		done:        done,
 		handler:     mux,
 		metricsMux:  promhttp.Handler(),
@@ -136,8 +179,15 @@ func (a *App) Run(ctx context.Context) error {
 
 	errCh := make(chan error, 2)
 	go func() {
-		log.Printf("proxy listening %s (sticky=%s)", a.cfg.ListenAddr, a.cfg.StickyMode)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Printf("proxy listening %s (sticky=%s, tls=%t, gateway=%t)",
+			a.cfg.ListenAddr, a.cfg.StickyMode, a.cfg.TLSCert != "", a.cfg.Gateway.Enabled())
+		var err error
+		if a.cfg.TLSCert != "" {
+			err = srv.ListenAndServeTLS(a.cfg.TLSCert, a.cfg.TLSKey)
+		} else {
+			err = srv.ListenAndServe()
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 		}
 	}()
@@ -161,6 +211,48 @@ func (a *App) Run(ctx context.Context) error {
 	return runErr
 }
 
+// newGateway builds the SSO gateway and checks that Redis answers: without
+// it no one can log in.
+func newGateway(cfg config.Config, provider gateway.Provider, clients *client.Loader, logger *slog.Logger) (*gateway.Gateway, redis.UniversalClient, error) {
+	g := cfg.Gateway
+	rdb, err := gateway.NewRedisClient(cfg.RedisURL)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gateway redis: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		_ = rdb.Close()
+		return nil, nil, fmt.Errorf("gateway redis unreachable: %w", err)
+	}
+	if provider == nil {
+		provider = gateway.NewOIDCProvider(gateway.OIDCConfig{
+			Issuer:       g.OIDCIssuer,
+			ClientID:     g.OIDCClientID,
+			ClientSecret: g.OIDCClientSecret,
+			RedirectURL:  gateway.RedirectURL(g.PublicURL),
+			Scopes:       g.OIDCScopes,
+			AuthParams:   g.OIDCAuthParams,
+		})
+	}
+	gw, err := gateway.New(gateway.Config{
+		PublicURL:     g.PublicURL,
+		AllowedDomain: g.OIDCAllowedDomain,
+		JWTSecrets:    g.JWTSecrets,
+		RefreshKeys:   g.RefreshKeys,
+		SessionTTL:    g.SessionTTL,
+		SessionMax:    g.SessionMax,
+		GrantTTL:      g.DeviceGrantTTL,
+		RateLimit:     g.DeviceRateLimit,
+		RateWindow:    g.DeviceRateWindow,
+	}, provider, rdb, clients, logger)
+	if err != nil {
+		_ = rdb.Close()
+		return nil, nil, err
+	}
+	return gw, rdb, nil
+}
+
 // newLogger builds the structured logger used for access and auth logging.
 func newLogger(cfg config.Config) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: slog.LevelInfo}
@@ -182,6 +274,9 @@ func (a *App) Close() error {
 	}
 	if a.clients != nil {
 		_ = a.clients.Close()
+	}
+	if a.gwRedis != nil {
+		_ = a.gwRedis.Close()
 	}
 	if a.store != nil {
 		return a.store.Close()
