@@ -17,6 +17,11 @@ clients:
   - name: agent-sora
     tokenSHA256: 0000000000000000000000000000000000000000000000000000000000000002
 
+  # A person who signs in with SSO through Claude Code's /login (needs the
+  # gateway: --public-url). The verified email from the IdP selects the entry.
+  # - name: alice
+  #   email: alice@example.com
+
   # Revoke access without deleting the record:
   # - name: agent-retired
   #   tokenSHA256: 0000000000000000000000000000000000000000000000000000000000000003

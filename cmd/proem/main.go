@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/barockok/proem/internal/app"
 	"github.com/barockok/proem/internal/client"
@@ -27,6 +29,23 @@ func main() {
 		}
 		if err := client.IssueAndDescribe(os.Args[2], os.Stdout); err != nil {
 			log.Fatal(err)
+		}
+		return
+	}
+
+	// The container image has no shell or curl, so container healthchecks
+	// call the binary itself. TLS trust follows SSL_CERT_FILE.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if len(os.Args) != 3 {
+			log.Fatal(fmt.Errorf("usage: proem healthcheck <url>"))
+		}
+		resp, err := (&http.Client{Timeout: 3 * time.Second}).Get(os.Args[2])
+		if err != nil {
+			log.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			log.Fatalf("healthcheck: status %d", resp.StatusCode)
 		}
 		return
 	}

@@ -10,7 +10,7 @@ description: Every series that Proem exports, and the number of series to expect
 | `proem_thinking_tokens_total` | `client`, `member` | Part of the `output` count. Proem reports it apart, so a sum of `tokens_total` does not count it twice. |
 | `proem_upstream_latency_seconds` | `client`, `member` | A histogram. It includes the time of any failover attempt. |
 | `proem_failovers_total` | `client`, `from_member`, `reason` | `reason` is the keyword that matched, `retry-after`, or `transport`. |
-| `proem_auth_failures_total` | `reason` | `missing_credentials`, `unknown_token` or `client_disabled`. |
+| `proem_auth_failures_total` | `reason` | `missing_credentials`, `unknown_token`, `client_disabled`; with the SSO gateway also `invalid_session`, `unknown_email`, `device_rate_limited`, `device_code_mismatch`, `device_code_unknown`, `device_csrf`, `device_code_reused`, `callback_no_session`, `callback_state_mismatch`, `sso_idp_error`, `sso_exchange_rejected`, `sso_missing_email`, `sso_email_unverified`, `sso_wrong_domain`, `refresh_invalid`, `refresh_rejected`, `refresh_sub_mismatch` and `session_max`. |
 | `proem_member_cooldown` | `member` | The value is `1` while the member is in cooldown. |
 | `proem_sticky_hits_total` | `result` | `hit` or `miss`. Proem reports it only in `redis` affinity mode. |
 | `proem_config_reloads_total` | `result` | `success` or `error`. |

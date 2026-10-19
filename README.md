@@ -20,6 +20,7 @@ export ANTHROPIC_AUTH_TOKEN=sk-ant-oat01-...   # issued by Proem, valid only her
 - **It puts one endpoint in front of several members.** A pool can contain the Anthropic API and any Anthropic-compatible gateway, such as OpenRouter, DeepSeek, or a gateway you host. Each member can map model names, so a client asks for one name whatever member answers.
 - **It keeps credentials in one place.** Member credentials stay in Proem's configuration, read from environment variables or files. Each client holds its own token, and you can revoke one client without changing the others.
 - **It attributes usage.** The query `sum by (client) (increase(proem_tokens_total[24h]))` reports what each client used. The count includes cache reads and cache writes, which are the largest counts on a cached workload.
+- **It lets people sign in with company SSO.** With the gateway on, Claude Code users run `/login`, sign in with Keycloak or Google, and get a short-lived Proem session. Their email selects their client in `clients.yaml`. See [SSO login](docs/site/_content/guides/sso-login.md).
 - **It fails over without stopping a stream.** Proem puts a rate-limited member in cooldown and tries the next one. It sends a response that cannot fail over straight to the client, without buffering.
 
 Proem does not change the terms of your agreement with a provider. It sends requests to the endpoints you configure, with the credentials you supply.
@@ -44,6 +45,7 @@ Proem serves the proxy on port 8080 and metrics on port 9090. The [quickstart](d
 | [How it works](docs/site/_content/start/how-it-works.md) | The path of a request |
 | [Pool members](docs/site/_content/guides/pool-members.md) | How to add, weight and map a member |
 | [Client tokens](docs/site/_content/guides/client-tokens.md) | How to issue, revoke and attribute |
+| [SSO login](docs/site/_content/guides/sso-login.md) | How to let Claude Code users sign in with SSO |
 | [Observability](docs/site/_content/guides/observability.md) | Access log, alerts, client IP |
 | [Architecture](docs/site/_content/reference/architecture.md) | The parts and the state |
 | [Configuration](docs/site/_content/reference/configuration.md) | Every option |
@@ -62,6 +64,7 @@ make build
 make install   # installs by atomic rename, which is safe while Proem runs
 ./scripts/coverage.sh    # enforce the coverage minimum
 npm ci && node docs/site/build.mjs   # build the documentation site
+make e2e       # SSO gateway end to end: Keycloak, Redis, real Claude Code (Docker)
 ```
 
-CI runs gofmt, vet, a race-enabled coverage gate with a 95% minimum over `internal/`, a smoke test of the binary against a live Redis, and a Docker build. A `v*` tag publishes signed binaries and a `ghcr.io` image, and then publishes the documentation site.
+CI runs gofmt, vet, a race-enabled coverage gate with a 95% minimum over `internal/`, a smoke test of the binary against a live Redis, and a Docker build. A separate E2E workflow runs the SSO gateway suite in [`e2e/`](e2e/README.md). A `v*` tag publishes signed binaries and a `ghcr.io` image, and then publishes the documentation site.

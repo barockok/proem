@@ -1,0 +1,8 @@
+# One member that stands in for api.anthropic.com. Proem injects the member's
+# credential as x-api-key; the mock records it so the driver can check that
+# the caller's JWT never reaches an upstream.
+members:
+  - id: mock
+    type: anthropic_api
+    cred: {env: MOCK_UPSTREAM_KEY}
+    baseURL: https://mock-upstream:8443

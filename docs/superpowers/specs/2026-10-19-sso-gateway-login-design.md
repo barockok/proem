@@ -1,6 +1,6 @@
 # SSO Gateway Login for Claude Code
 
-- **Status:** Draft, revised after review (2026-10-19)
+- **Status:** Implemented (2026-10-19). Protocol claims verified, see "Protocol sources".
 - **Date:** 2026-10-19
 - **Target release:** v0.5.0
 
@@ -56,6 +56,30 @@ Observed in the Claude Code 2.1.197 client and its built-in `claude gateway` ser
 - `https://` is required except for loopback hosts. The client pins the TLS leaf certificate on
   first login and re-checks it on startup.
 - A 401 with Anthropic error envelope prompts the user to log in again.
+
+### Protocol sources
+
+Checked on 2026-10-19 against the published `@anthropic-ai/claude-code@2.1.197`
+(native binary from `@anthropic-ai/claude-code-linux-x64@2.1.197`), by reading
+the bundled JavaScript in the binary, and by running it in the e2e suite.
+
+| Claim | Where it is seen in 2.1.197 |
+|---|---|
+| Metadata at `{base}/.well-known/oauth-authorization-server`; only `device_authorization_endpoint` and `token_endpoint` are read | `[gateway-login]` code: zod schema with those two optional strings |
+| Endpoints not same-origin are ignored, fallback `/oauth/device_authorization`, `/oauth/token` | `ignoring advertised endpoint ... (not same-origin with ...)` |
+| Device authorization is `POST` with an empty form body | `mb.post(deviceAuthorizationEndpoint,"",{Content-Type: application/x-www-form-urlencoded})` |
+| Response shape `{device_code, user_code, verification_uri, verification_uri_complete?, expires_in, interval?}` | zod schema for the device response |
+| Poll errors `authorization_pending`, `slow_down` (+5s), `expired_token`, `access_denied` | poll loop |
+| Token response `{access_token, expires_in, refresh_token?}` | stored as `{jwt, expiresAt, tokenEndpoint, idpRefreshToken}` |
+| Refresh `grant_type=refresh_token` 5 minutes before expiry; `invalid_grant` clears the refresh token; other errors retried; missing `refresh_token` keeps the old one | `[gateway-refresh]` code |
+| TLS leaf pinned at login | `TLS certificate for ... changed during sign-in` |
+| `forceLoginMethod: "gateway"` selects the "Cloud gateway OIDC device flow"; `forceLoginGatewayUrl` pre-fills the URL and is read from managed (policy) settings | settings schema descriptions |
+| Headless mode `CLAUDE_CODE_USE_GATEWAY=1` + `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN`; the JWT `exp` sets the expiry | `CLAUDE_CODE_USE_GATEWAY is set but ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN is missing` |
+
+Found in the e2e run: headless mode refuses to start when managed settings also
+set `forceLoginMethod: "gateway"`, by design ("forceLoginMethod is 'gateway'
+in managed settings; run interactive /login"). The `claude` smoke service therefore sets only `forceLoginGatewayUrl`.
+Pilot laptops, which use the interactive `/login`, keep both settings.
 
 ## Architecture
 
