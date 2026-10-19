@@ -1,0 +1,66 @@
+{
+  "realm": "proem",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "verifyEmail": false,
+  "loginWithEmailAllowed": true,
+  "revokeRefreshToken": false,
+  "clients": [
+    {
+      "clientId": "proem",
+      "name": "proem e2e",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "proem-e2e-secret",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "https://proem:8443/oauth/callback",
+        "https://proem-short:8443/oauth/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": ["web-origins", "acr", "profile", "roles", "basic", "email"],
+      "optionalClientScopes": ["offline_access", "address", "phone", "microprofile-jwt"]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "firstName": "Alice",
+      "lastName": "Example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "alice-pw", "temporary": false}],
+      "realmRoles": ["default-roles-proem", "offline_access"]
+    },
+    {
+      "username": "bob",
+      "email": "bob@example.com",
+      "firstName": "Bob",
+      "lastName": "Example",
+      "emailVerified": true,
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "bob-pw", "temporary": false}],
+      "realmRoles": ["default-roles-proem", "offline_access"]
+    },
+    {
+      "username": "dave",
+      "email": "dave@example.com",
+      "firstName": "Dave",
+      "lastName": "Example",
+      "emailVerified": false,
+      "enabled": true,
+      "credentials": [{"type": "password", "value": "dave-pw", "temporary": false}],
+      "realmRoles": ["default-roles-proem", "offline_access"]
+    }
+  ]
+}

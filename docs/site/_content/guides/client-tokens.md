@@ -50,10 +50,12 @@ clients:
 |---|---|
 | `name` | The attribution label. Use letters, digits, `.`, `_` and `-`. The limit is 64 characters. |
 | `tokenSHA256` | The hex SHA-256 digest of the token. It must be unique. |
+| `email` | Optional. The email of a person who signs in with [SSO login](sso-login.md). It must be unique, without case. |
 | `enabled` | The default is true. Set it to `false` to revoke access and keep the record. |
 
-Proem rejects a duplicate name, a duplicate token, a digest that is not valid
-hex, and an empty list. You can write the file as YAML or as JSON. Proem
+Each client needs a `tokenSHA256`, an `email`, or both. Proem rejects a
+duplicate name, a duplicate token, a duplicate email, a digest that is not
+valid hex, and an empty list. You can write the file as YAML or as JSON. Proem
 reloads it after a change. If a change fails validation, Proem keeps the
 registry that is already running, so a mistake cannot lock out every client.
 

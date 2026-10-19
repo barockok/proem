@@ -1,0 +1,42 @@
+name: E2E
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  sso-gateway:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE: docker compose -f e2e/docker-compose.yml
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate the throwaway CA and proem certificate
+        run: ./e2e/certs/gen.sh
+
+      - name: Start Keycloak, Redis, the mock upstream and proem
+        run: $COMPOSE up -d --build --wait
+
+      - name: Protocol scenarios (driver)
+        run: $COMPOSE --profile driver run --rm --build driver
+
+      - name: Real Claude Code smoke
+        run: $COMPOSE --profile claude run --rm --build claude
+
+      - name: Collect logs
+        if: failure()
+        run: |
+          mkdir -p e2e/artifacts
+          $COMPOSE --profile driver --profile claude logs --no-color > e2e/artifacts/compose.log 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-logs
+          path: e2e/artifacts/
+
+      - name: Tear down
+        if: always()
+        run: $COMPOSE --profile driver --profile claude down -v --remove-orphans

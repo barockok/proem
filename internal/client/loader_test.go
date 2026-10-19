@@ -3,6 +3,7 @@ package client
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -211,4 +212,102 @@ func TestIssueTokenRoundTripsThroughRegistry(t *testing.T) {
 	if !ok || c.Name != "agent-issued" {
 		t.Fatal("issued token must resolve through the registry it was minted for")
 	}
+}
+
+// replaceFile swaps in new contents via rename, the way editors and
+// `mv tmp clients.yaml` do, so the original inode is gone afterwards.
+func replaceFile(t *testing.T, path, body string) {
+	t.Helper()
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// waitForClient polls until token resolves to name or the deadline passes.
+func waitForClient(t *testing.T, l *Loader, token, name string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if c, ok := l.Active().Lookup(token); ok && c.Name == name {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("watcher never loaded client %q", name)
+}
+
+func TestWatchSurvivesAtomicReplace(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, registryYAML("agent-maria", "tok"))
+	l, err := NewLoader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	done := make(chan struct{})
+	defer close(done)
+	l.Watch(done, nil)
+
+	replaceFile(t, path, registryYAML("agent-sora", "tok2"))
+	waitForClient(t, l, "tok2", "agent-sora")
+
+	// A watch on the file itself is lost after the first replace; this
+	// second change is the one that used to be missed.
+	replaceFile(t, path, registryYAML("agent-kai", "tok3"))
+	waitForClient(t, l, "tok3", "agent-kai")
+
+	writeFile(t, dir, registryYAML("agent-lin", "tok4"))
+	waitForClient(t, l, "tok4", "agent-lin")
+}
+
+// TestWatchFollowsConfigMapSwap mimics how Kubernetes updates a mounted
+// ConfigMap: the file is a symlink through ..data, and an update atomically
+// repoints ..data at a new timestamped directory. Linux only: kqueue does not
+// report a rename over an existing name, and ConfigMaps only exist on Linux.
+func TestWatchFollowsConfigMapSwap(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("ConfigMap symlink swaps are only observable through inotify")
+	}
+	dir := t.TempDir()
+	publish := func(version, body string) {
+		t.Helper()
+		ts := filepath.Join(dir, "..v"+version)
+		if err := os.Mkdir(ts, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(ts, "clients.yaml"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		tmp := filepath.Join(dir, "..data_tmp")
+		if err := os.Symlink("..v"+version, tmp); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(tmp, filepath.Join(dir, "..data")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publish("1", registryYAML("agent-maria", "tok"))
+	path := filepath.Join(dir, "clients.yaml")
+	if err := os.Symlink(filepath.Join("..data", "clients.yaml"), path); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := NewLoader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	done := make(chan struct{})
+	defer close(done)
+	l.Watch(done, nil)
+
+	publish("2", registryYAML("agent-sora", "tok2"))
+	waitForClient(t, l, "tok2", "agent-sora")
+
+	publish("3", registryYAML("agent-kai", "tok3"))
+	waitForClient(t, l, "tok3", "agent-kai")
 }

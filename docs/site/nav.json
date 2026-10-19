@@ -39,6 +39,7 @@
           "items": [
             { "path": "guides/pool-members", "label": "Pool members" },
             { "path": "guides/client-tokens", "label": "Client tokens" },
+            { "path": "guides/sso-login", "label": "SSO login" },
             { "path": "guides/observability", "label": "Observability" }
           ]
         }

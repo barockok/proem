@@ -1,0 +1,161 @@
+# Self-contained SSO gateway e2e: real Keycloak, Redis, a mock Anthropic
+# upstream and three proem instances. No secrets, no calls to Anthropic.
+# Run with `make e2e` (see e2e/README.md).
+name: proem-e2e
+
+x-proem: &proem
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: proem-e2e:local
+  depends_on:
+    keycloak: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    mock-upstream: {condition: service_healthy}
+    init: {condition: service_completed_successfully}
+  volumes:
+    - ./proem/pool.yaml:/etc/proem/pool.yaml:ro
+    - ./certs/out:/certs:ro
+    - clients:/clients
+  environment: &proem-env
+    MOCK_UPSTREAM_KEY: sk-ant-api03-e2e-mock-upstream
+    OIDC_CLIENT_ID: proem
+    OIDC_CLIENT_SECRET: proem-e2e-secret
+    PROEM_JWT_SECRET: e2e-only-jwt-secret-0123456789abcdef
+    PROEM_REFRESH_KEY: ZTJlLW9ubHktcmVmcmVzaC1rZXktMDEyMzQ1Njc4OWE=
+    OIDC_SCOPES: openid,email,profile,offline_access
+    SSL_CERT_FILE: /certs/ca.pem
+
+services:
+  keycloak:
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:26.4.0}
+    command: ["start-dev", "--import-realm", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    volumes:
+      - ./keycloak/realm-proem.json:/opt/keycloak/data/import/realm-proem.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mock-upstream:
+    build:
+      context: ..
+      dockerfile: e2e/mock-upstream/Dockerfile
+    environment:
+      SSL_CERT_FILE: /certs/ca.pem
+    volumes:
+      - ./certs/out:/certs:ro
+    healthcheck:
+      test: ["CMD", "/mock-upstream", "-healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Seeds the shared clients.yaml directory and the token hand-off directory.
+  # A directory (not a single-file bind mount) lets the driver replace
+  # clients.yaml by rename, as editors and ConfigMaps do.
+  init:
+    image: redis:7-alpine
+    entrypoint: ["sh", "-c"]
+    command:
+      - cp /template/clients.yaml /clients/clients.yaml && chmod 0777 /clients /shared && chmod 0666 /clients/clients.yaml
+    volumes:
+      - ./proem/clients.yaml:/template/clients.yaml:ro
+      - clients:/clients
+      - shared:/shared
+
+  proem:
+    <<: *proem
+    command:
+      - --config=/etc/proem/pool.yaml
+      - --clients=/clients/clients.yaml
+      - --listen=:8443
+      - --metrics-addr=:9090
+      - --redis-url=redis://redis:6379/0
+      - --tls-cert=/certs/proem.pem
+      - --tls-key=/certs/proem.key
+      - --public-url=https://proem:8443
+      - --oidc-issuer=http://keycloak:8080/realms/proem
+      - --device-rate-limit=1000/min
+    healthcheck:
+      test: ["CMD", "/proem", "healthcheck", "https://localhost:8443/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Short lifetimes for the expiry, session-max and rate-limit scenarios.
+  proem-short:
+    <<: *proem
+    command:
+      - --config=/etc/proem/pool.yaml
+      - --clients=/clients/clients.yaml
+      - --listen=:8443
+      - --metrics-addr=:9090
+      - --redis-url=redis://redis:6379/1
+      - --tls-cert=/certs/proem.pem
+      - --tls-key=/certs/proem.key
+      - --public-url=https://proem-short:8443
+      - --oidc-issuer=http://keycloak:8080/realms/proem
+      - --device-grant-ttl=15s
+      - --session-ttl=10s
+      - --session-max=20s
+      - --device-rate-limit=6/min
+    healthcheck:
+      test: ["CMD", "/proem", "healthcheck", "https://localhost:8443/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The gateway off: proves token clients behave exactly as before.
+  proem-legacy:
+    <<: *proem
+    command:
+      - --config=/etc/proem/pool.yaml
+      - --clients=/clients/clients.yaml
+      - --listen=:8080
+      - --metrics-addr=:9090
+      - --redis-url=redis://redis:6379/2
+    healthcheck:
+      test: ["CMD", "/proem", "healthcheck", "http://localhost:8080/health"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  driver:
+    build:
+      context: ..
+      dockerfile: e2e/driver/Dockerfile
+    profiles: ["driver"]
+    environment:
+      E2E_SHORT_SESSION_MAX: 20s
+    volumes:
+      - ./certs/out:/certs:ro
+      - clients:/clients
+      - shared:/shared
+
+  claude:
+    build:
+      context: ..
+      dockerfile: e2e/claude/Dockerfile
+    profiles: ["claude"]
+    environment:
+      NODE_EXTRA_CA_CERTS: /certs/ca.pem
+    volumes:
+      - ./certs/out:/certs:ro
+      - shared:/shared
+
+volumes:
+  clients:
+  shared:

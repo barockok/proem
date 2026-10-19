@@ -1,0 +1,12 @@
+# e2e client registry. The driver edits a copy of this file at run time.
+clients:
+  - name: alice
+    email: alice@example.com
+  - name: dave
+    email: dave@example.com
+  - name: erin
+    email: erin@example.com
+    enabled: false
+  # Token: sk-ant-oat01-e2e-legacy-token
+  - name: legacy
+    tokenSHA256: a7eb2452513f5e8b1c806ade20394b96eee404cfcf456d2df5be6dfca577547f

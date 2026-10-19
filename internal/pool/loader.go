@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync/atomic"
 
+	"github.com/barockok/proem/internal/watchfile"
 	"github.com/fsnotify/fsnotify"
 	"gopkg.in/yaml.v3"
 )
@@ -21,14 +22,9 @@ func NewLoader(path string) (*Loader, error) {
 	if err := l.reload(); err != nil {
 		return nil, err
 	}
-	w, err := fsnotify.NewWatcher()
+	w, err := watchfile.New(path)
 	if err != nil {
 		return nil, err
-	}
-	if err := w.Add(path); err != nil {
-		// try adding dir if file not yet exists watch fails
-		// fallback: watch dir
-		_ = w.Add(".")
 	}
 	l.watcher = w
 	return l, nil
@@ -84,7 +80,7 @@ func (l *Loader) Watch(done <-chan struct{}, onError func(error)) {
 				if !ok {
 					return
 				}
-				if ev.Op&(fsnotify.Write|fsnotify.Create|fsnotify.Rename) != 0 {
+				if watchfile.Affects(l.path, ev) {
 					if err := l.reload(); err != nil && onError != nil {
 						onError(err)
 					}
