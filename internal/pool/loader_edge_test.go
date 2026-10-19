@@ -3,6 +3,7 @@ package pool
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -144,4 +145,34 @@ members:
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatal("watcher never picked up the valid reload")
+}
+
+func TestWatchSurvivesAtomicReplace(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pool.yaml")
+	os.WriteFile(path, []byte(oneMember), 0o644)
+	l, err := NewLoader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	done := make(chan struct{})
+	defer close(done)
+	l.Watch(done, nil)
+
+	// The second replace is the one a watch on the file itself would miss.
+	for _, id := range []string{"first", "second"} {
+		tmp := path + ".tmp"
+		os.WriteFile(tmp, []byte(strings.Replace(oneMember, "id: a", "id: "+id, 1)), 0o644)
+		if err := os.Rename(tmp, path); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(3 * time.Second)
+		for l.Active().Members[0].ID != id {
+			if time.Now().After(deadline) {
+				t.Fatalf("watcher never loaded member %q after replace", id)
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+	}
 }
